@@ -43,6 +43,18 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
+## Configuration
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `LLM_SERVICE_URLS` | `http://localhost:9001,http://localhost:9002,http://localhost:9003` | Comma-separated backend URLs |
+| `HEDGE_DELAY_MS` | `250` | Wait this long for a backend before also sending the request to the next one |
+| `UPSTREAM_MAX_ATTEMPTS` | `3` | Max backends a single request may be in flight on (`1` disables hedging) |
+| `GENERATE_CACHE_MAX_ENTRIES` | `1024` | `/v1/generate` response cache size, keyed on `(prompt, max_tokens)` (`0` disables) |
+| `GENERATE_CACHE_TTL_S` | `300` | Cache entry lifetime in seconds |
+
+The cache assumes backends return the same completion for the same prompt; disable it for non-deterministic sampling.
+
 ## Layout
 
 - `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware

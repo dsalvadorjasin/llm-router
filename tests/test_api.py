@@ -49,3 +49,22 @@ def test_generate_validates_prompt():
     r = c.post("/v1/generate", json={})
     c.__exit__(None, None, None)
     assert r.status_code == 422
+
+
+def test_generate_caches_successful_responses_per_prompt_and_max_tokens():
+    pool = FakePool()
+    c = client_with(pool)
+    for _ in range(2):
+        c.post("/v1/generate", json={"prompt": "hi", "max_tokens": 8})
+    c.post("/v1/generate", json={"prompt": "hi", "max_tokens": 16})
+    c.__exit__(None, None, None)
+    assert pool.calls == [{"prompt": "hi", "max_tokens": 8}, {"prompt": "hi", "max_tokens": 16}]
+
+
+def test_generate_does_not_cache_errors():
+    pool = FakePool(status=503, body={"detail": "model overloaded"})
+    c = client_with(pool)
+    for _ in range(2):
+        c.post("/v1/generate", json={"prompt": "hi"})
+    c.__exit__(None, None, None)
+    assert len(pool.calls) == 2

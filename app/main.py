@@ -6,6 +6,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import config
+from .cache import ResponseCache
 from .middleware.logging import RequestLogMiddleware
 from .routes.chat import router as chat_router
 from .routes.conversations import router as conversations_router
@@ -20,6 +22,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.pool = UpstreamPool()
+    app.state.generate_cache = ResponseCache(
+        max_entries=config.generate_cache_max_entries(),
+        ttl_s=config.generate_cache_ttl_s(),
+    )
     app.state.store = Store(os.environ.get("APP_DB_PATH", "data/app.db"))
     yield
     await app.state.pool.aclose()
@@ -32,7 +38,10 @@ app.add_middleware(RequestLogMiddleware)
 
 @app.post("/v1/generate")
 async def generate(req: GenerateRequest):
-    status, body = await app.state.pool.forward(req.model_dump())
+    payload = req.model_dump()
+    status, body = await app.state.generate_cache.get_or_fetch(
+        (req.prompt, req.max_tokens), lambda: app.state.pool.forward(payload)
+    )
     return JSONResponse(status_code=status, content=body)
 
 
