@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .cache import ResponseCache, cache_max_entries, cache_ttl_s
 from .middleware.logging import RequestLogMiddleware
 from .routes.chat import router as chat_router
 from .routes.conversations import router as conversations_router
@@ -19,7 +20,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.pool = UpstreamPool()
+    app.state.pool = ResponseCache(
+        UpstreamPool(), ttl_s=cache_ttl_s(), max_entries=cache_max_entries()
+    )
     app.state.store = Store(os.environ.get("APP_DB_PATH", "data/app.db"))
     yield
     await app.state.pool.aclose()
