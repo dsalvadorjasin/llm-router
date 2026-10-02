@@ -43,9 +43,18 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
+## Response cache
+
+`/v1/generate` and `/v1/chat` share an in-process response cache (`app/cache.py`) wrapped around the upstream pool. Successful (200) upstream bodies are cached verbatim (including `signature`) keyed by `(prompt, max_tokens)`; errors are never cached, and concurrent identical misses share one upstream call.
+
+| Env var                      | Default | Description                                  |
+|------------------------------|---------|----------------------------------------------|
+| `RESPONSE_CACHE_TTL_S`       | `60`    | Entry lifetime in seconds; `0` disables cache |
+| `RESPONSE_CACHE_MAX_ENTRIES` | `1024`  | Max cached entries (LRU eviction); `0` disables cache |
+
 ## Layout
 
-- `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware
+- `app/` — FastAPI gateway: generate/chat/info routes, response cache, conversation store, markdown export, request logging middleware
 - `bench/` — k6 load test script and weighted workload
 - `docker-compose.yml` — backend fleet service definitions
 - `frontend/` — React + TypeScript playground UI (Vite, Vitest, Testing Library, Playwright)
