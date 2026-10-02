@@ -261,7 +261,7 @@ def test_hedge_config_defaults_and_overrides(monkeypatch):
     for var in ("LLM_UPSTREAM_HEDGE_DELAY_MS", "LLM_UPSTREAM_HEDGE_BUDGET_RATIO",
                 "LLM_UPSTREAM_HEDGE_BUDGET_BURST"):
         monkeypatch.delenv(var, raising=False)
-    assert upstream_hedge_delay() == pytest.approx(0.2)
+    assert upstream_hedge_delay() == pytest.approx(0.165)
     assert upstream_hedge_budget() == (0.2, 10.0)
     monkeypatch.setenv("LLM_UPSTREAM_HEDGE_DELAY_MS", "0")
     assert upstream_hedge_delay() is None
@@ -284,5 +284,5 @@ def test_stats_endpoint_exposes_upstream_amplification():
         body = c.get("/v1/upstream/stats").json()
     assert {"requests", "attempts", "hedges", "hedges_denied", "hedge_wins",
             "failovers", "failed_attempts", "exhausted"} <= set(body)
-    assert body["hedge_delay_ms"] == pytest.approx(200)
+    assert body["hedge_delay_ms"] == pytest.approx(165)
     assert len(body["upstreams"]) == 3

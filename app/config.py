@@ -55,7 +55,7 @@ def _non_negative_float(name: str, default: float) -> float:
 
 def upstream_hedge_delay() -> float | None:
     """Seconds before a slow attempt is hedged on another replica; None disables."""
-    ms = _non_negative_float("LLM_UPSTREAM_HEDGE_DELAY_MS", 200.0)
+    ms = _non_negative_float("LLM_UPSTREAM_HEDGE_DELAY_MS", 165.0)
     return ms / 1000 if ms > 0 else None
 
 

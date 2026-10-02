@@ -38,18 +38,21 @@ make e2e     # run the Playwright end-to-end UI tests
 | `LLM_UPSTREAM_READ_TIMEOUT` | `10` | Seconds to wait for each chunk of a backend response |
 | `LLM_UPSTREAM_WRITE_TIMEOUT` | `5` | Seconds to send each chunk of the request to a backend |
 | `LLM_UPSTREAM_POOL_TIMEOUT` | `5` | Seconds to wait for a free connection from the client pool |
-| `LLM_UPSTREAM_HEDGE_DELAY_MS` | `200` | Milliseconds before a still-pending backend attempt is hedged on another replica; `0` disables hedging |
+| `LLM_UPSTREAM_HEDGE_DELAY_MS` | `165` | Milliseconds before a still-pending backend attempt is hedged on another replica; `0` disables hedging |
 | `LLM_UPSTREAM_HEDGE_BUDGET_RATIO` | `0.2` | Hedge tokens earned per request (long-run cap on hedges as a fraction of requests) |
 | `LLM_UPSTREAM_HEDGE_BUDGET_BURST` | `10` | Maximum stored hedge tokens |
+| `RESPONSE_CACHE_TTL_S` | `60` | Successful response cache TTL in seconds; `0` disables caching |
+| `RESPONSE_CACHE_MAX_ENTRIES` | `1024` | LRU cache entry limit; `0` disables caching |
 
-Timeouts must be positive, finite numbers. A backend timeout is returned as `504` with
+Timeouts must be positive, finite numbers. Exhausted backend timeouts return `503` with
 `{"detail": "upstream <connect|read|write|pool> timeout"}`.
 
 Each attempt goes to the replica with the lowest `(in_flight + 1) * latency_ewma`; replicas
 that returned a 5xx or transport error are skipped for 1s. Failed attempts fail over to another
-replica (up to one attempt per replica). Slow attempts are hedged within the hedge budget and
+replica. Slow attempts are hedged within the hedge budget, preferring fast replicas, and
 the first valid answer wins; losing attempts are cancelled. When every attempt fails the router
-returns `504` (all timed out), `503` (no replica reachable) or `502` (`{"detail": "upstream error"}`).
+returns `503` (all timed out or no replica reachable) or `502` (`{"detail": "upstream error"}`).
+The total attempt count is capped at the number of configured replicas.
 `GET /v1/upstream/stats` reports requests, attempts, hedges, hedge wins, failovers and
 exhaustions so upstream amplification is visible.
 

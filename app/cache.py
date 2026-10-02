@@ -98,8 +98,11 @@ class ResponseCache:
         return status, copy.deepcopy(body)
 
     async def aclose(self) -> None:
-        for inflight in list(self._inflight.values()):
-            inflight.task.cancel()
+        pending = [inflight.task for inflight in self._inflight.values()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         self._inflight.clear()
         self._entries.clear()
         await self._pool.aclose()

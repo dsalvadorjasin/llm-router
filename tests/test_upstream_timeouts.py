@@ -127,13 +127,13 @@ def test_pool_client_uses_env_timeouts(monkeypatch):
     assert (t.connect, t.read) == (0.7, 4.5)
 
 
-def test_hung_replica_read_timeout_returns_504_and_round_robin_continues(monkeypatch):
+def test_hung_replica_read_timeout_returns_503_and_round_robin_continues(monkeypatch):
     monkeypatch.setenv("LLM_UPSTREAM_READ_TIMEOUT", "0.3")
     with _replica("hang") as hung, _replica("ok") as healthy:
         pool = UpstreamPool(urls=[hung, healthy], max_attempts=1)
         (t_hung, r_hung), (t_ok, r_ok) = _timed_forward(pool, n=2)
 
-    assert r_hung == (504, {"detail": "upstream read timeout"})
+    assert r_hung == (503, {"detail": "upstream read timeout"})
     assert 0.25 <= t_hung < 2.0
     assert r_ok == (200, {"completion": "ok", "signature": "ab" * 32})
     assert t_ok < 1.0
@@ -154,7 +154,7 @@ def test_stalled_response_body_hits_read_timeout():
         pool = UpstreamPool(urls=[stalled], timeout=httpx.Timeout(5.0, read=0.3))
         [(elapsed, result)] = _timed_forward(pool)
 
-    assert result == (504, {"detail": "upstream read timeout"})
+    assert result == (503, {"detail": "upstream read timeout"})
     assert elapsed < 2.0
 
 
@@ -181,11 +181,11 @@ def test_unaccepting_replica_hits_connect_timeout():
             s.close()
         srv.close()
 
-    assert result == (504, {"detail": "upstream connect timeout"})
+    assert result == (503, {"detail": "upstream connect timeout"})
     assert elapsed < 2.0
 
 
-def test_generate_and_chat_surface_upstream_timeout_as_504(monkeypatch):
+def test_generate_and_chat_surface_upstream_timeout_as_503(monkeypatch):
     monkeypatch.setenv("LLM_UPSTREAM_READ_TIMEOUT", "0.3")
     with _replica("hang") as hung:
         c = TestClient(main.app)
@@ -199,8 +199,8 @@ def test_generate_and_chat_surface_upstream_timeout_as_504(monkeypatch):
         finally:
             c.__exit__(None, None, None)
 
-    assert gen.status_code == 504
+    assert gen.status_code == 503
     assert gen.json() == {"detail": "upstream read timeout"}
-    assert chat.status_code == 504
+    assert chat.status_code == 503
     assert chat.json() == {"detail": "upstream read timeout"}
     assert msgs == []

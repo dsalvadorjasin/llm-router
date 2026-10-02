@@ -40,7 +40,7 @@ def _status(code: int, **kw) -> Behavior:
     return lambda r: httpx.Response(code, **kw)
 
 
-def _raise(exc_type: type[httpx.TransportError]) -> Behavior:
+def _raise(exc_type: type[httpx.RequestError]) -> Behavior:
     def behavior(request: httpx.Request) -> httpx.Response:
         raise exc_type("boom", request=request)
 
@@ -67,6 +67,20 @@ def test_connection_error_fails_over():
     pool = _pool({URLS[0]: _raise(httpx.ConnectError)}, hits)
     assert _run(pool) == [(200, OK)]
     assert hits == URLS[:2]
+
+
+def test_decoding_error_fails_over():
+    hits: list[str] = []
+    pool = _pool({URLS[0]: _raise(httpx.DecodingError)}, hits)
+    assert _run(pool) == [(200, OK)]
+    assert hits == URLS[:2]
+
+
+def test_all_replicas_timeout_returns_503_json():
+    hits: list[str] = []
+    pool = _pool({u: _raise(httpx.ReadTimeout) for u in URLS}, hits)
+    assert _run(pool) == [(503, {"detail": "upstream read timeout"})]
+    assert hits == URLS
 
 
 def test_all_replicas_down_returns_503_json():

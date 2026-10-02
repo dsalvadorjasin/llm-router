@@ -14,7 +14,7 @@ FAILURE_COOLDOWN_S = 1.0
 LATENCY_FLOOR_S = 0.05
 LATENCY_EWMA_ALPHA = 0.3
 
-_RETRIABLE_ERRORS = (httpx.TransportError,)
+_RETRIABLE_ERRORS = (httpx.RequestError,)
 
 _TIMEOUT_DETAIL = {
     httpx.ConnectTimeout: "upstream connect timeout",
@@ -80,8 +80,8 @@ class UpstreamPool:
     is not.
 
     At most ``max_attempts`` attempts are made per request (default: the
-    number of upstreams). When every attempt fails, a JSON 504 is returned if every
-    attempt timed out, a JSON 503 if no replica produced a response, otherwise
+    number of upstreams). When every attempt fails, a JSON 503 is returned if no
+    replica produced a response, otherwise
     a JSON 502. ``forward`` never raises for upstream failures.
     """
 
@@ -246,7 +246,7 @@ class UpstreamPool:
         log.warning("upstream attempts exhausted after %d tries: %s", len(failures), last_error)
         timeouts = [f.timeout_detail for f in failures if f.timeout_detail]
         if timeouts and len(timeouts) == len(failures):
-            return 504, {"detail": timeouts[-1]}
+            return 503, {"detail": timeouts[-1]}
         if any(f.status is not None for f in failures):
             return 502, {"detail": "upstream error", "last_error": last_error}
         return 503, {"detail": "all upstreams unavailable", "last_error": last_error}

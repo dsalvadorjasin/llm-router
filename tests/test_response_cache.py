@@ -264,6 +264,34 @@ def test_aclose_closes_wrapped_pool():
     assert pool.closed
 
 
+def test_aclose_finishes_cancelled_fetch_before_closing_pool():
+    async def go():
+        started = asyncio.Event()
+        cleaned_up = asyncio.Event()
+
+        class PendingPool:
+            async def forward(self, payload):
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    await asyncio.sleep(0)
+                    cleaned_up.set()
+
+            async def aclose(self):
+                assert cleaned_up.is_set()
+
+        cache = ResponseCache(PendingPool())
+        waiter = asyncio.create_task(cache.forward({"prompt": "p", "max_tokens": 8}))
+        await started.wait()
+        await cache.aclose()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert len(cache) == 0
+
+    run(go())
+
+
 def test_config_env(monkeypatch):
     monkeypatch.delenv("RESPONSE_CACHE_TTL_S", raising=False)
     monkeypatch.delenv("RESPONSE_CACHE_MAX_ENTRIES", raising=False)
