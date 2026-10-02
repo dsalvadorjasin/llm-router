@@ -29,4 +29,5 @@ export interface ChatResponse {
   latency_ms: number;
   model: string | null;
   usage: Usage | null;
+  upstream?: string;
 }

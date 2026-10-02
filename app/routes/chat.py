@@ -21,8 +21,9 @@ async def chat(body: ChatRequest, request: Request):
     prompt = flatten_history(history, body.message)
 
     start = time.monotonic()
-    status, upstream = await request.app.state.pool.forward(
-        {"prompt": prompt, "max_tokens": body.max_tokens}
+    status, upstream, upstream_url = await request.app.state.pool.forward(
+        {"prompt": prompt, "max_tokens": body.max_tokens},
+        request_id=request.state.request_id,
     )
     latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -42,4 +43,5 @@ async def chat(body: ChatRequest, request: Request):
         "latency_ms": latency_ms,
         "model": upstream.get("model"),
         "usage": upstream.get("usage"),
+        "upstream": upstream_url,
     }

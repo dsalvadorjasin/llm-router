@@ -7,14 +7,16 @@ class FakePool:
     def __init__(self, status=200):
         self.status = status
         self.calls: list[dict] = []
+        self.request_ids: list[str | None] = []
 
-    async def forward(self, payload):
+    async def forward(self, payload, request_id=None):
         self.calls.append(payload)
+        self.request_ids.append(request_id)
         return self.status, (
             {"completion": "mock answer", "model": "mock-large",
              "usage": {"prompt_tokens": 5, "completion_tokens": 2}}
             if self.status == 200 else {"detail": "model overloaded"}
-        )
+        ), "http://fake-upstream:9001"
 
     async def aclose(self):
         pass
@@ -41,6 +43,8 @@ def test_chat_roundtrip_persists_and_titles():
     assert body["message"]["content"] == "mock answer"
     assert isinstance(body["latency_ms"], int)
     assert body["model"] == "mock-large"
+    assert body["upstream"] == "http://fake-upstream:9001"
+    assert pool.request_ids == [resp.headers["x-request-id"]]
 
     # exactly one upstream call, carrying flattened history
     assert len(pool.calls) == 1

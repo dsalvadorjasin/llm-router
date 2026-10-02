@@ -10,9 +10,9 @@ class FakePool:
         self.body = body or {"completion": "ok", "signature": "ab" * 32}
         self.calls: list[dict] = []
 
-    async def forward(self, payload):
+    async def forward(self, payload, request_id=None):
         self.calls.append(payload)
-        return self.status, self.body
+        return self.status, self.body, "http://fake:9000"
 
     async def aclose(self):
         pass

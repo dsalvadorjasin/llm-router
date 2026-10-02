@@ -6,8 +6,8 @@ from app import main
 
 
 class FakePool:
-    async def forward(self, payload):
-        return 200, {"completion": "ok"}
+    async def forward(self, payload, request_id=None):
+        return 200, {"completion": "ok"}, "http://fake:9000"
 
     async def aclose(self):
         pass

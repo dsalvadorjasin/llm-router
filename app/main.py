@@ -2,7 +2,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,8 +31,10 @@ app.add_middleware(RequestLogMiddleware)
 
 
 @app.post("/v1/generate")
-async def generate(req: GenerateRequest):
-    status, body = await app.state.pool.forward(req.model_dump())
+async def generate(req: GenerateRequest, request: Request):
+    status, body, _ = await app.state.pool.forward(
+        req.model_dump(), request_id=request.state.request_id
+    )
     return JSONResponse(status_code=status, content=body)
 
 

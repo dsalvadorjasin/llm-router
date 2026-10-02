@@ -61,6 +61,7 @@ class ChatTurnResponse(BaseModel):
     # backend, whose exact field set this service doesn't own, so it isn't
     # worth (or safe) pinning to a strict shape here.
     usage: dict | None = None
+    upstream: str | None = None
 
 
 class InfoResponse(BaseModel):
