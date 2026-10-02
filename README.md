@@ -33,14 +33,25 @@ make e2e     # run the Playwright end-to-end UI tests
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_SERVICE_URLS` | `http://localhost:9001,http://localhost:9002,http://localhost:9003` | Comma-separated backend replica URLs (round-robin) |
+| `LLM_SERVICE_URLS` | `http://localhost:9001,http://localhost:9002,http://localhost:9003` | Comma-separated backend replica URLs |
 | `LLM_UPSTREAM_CONNECT_TIMEOUT` | `2` | Seconds to establish a connection to a backend |
 | `LLM_UPSTREAM_READ_TIMEOUT` | `10` | Seconds to wait for each chunk of a backend response |
 | `LLM_UPSTREAM_WRITE_TIMEOUT` | `5` | Seconds to send each chunk of the request to a backend |
 | `LLM_UPSTREAM_POOL_TIMEOUT` | `5` | Seconds to wait for a free connection from the client pool |
+| `LLM_UPSTREAM_HEDGE_DELAY_MS` | `200` | Milliseconds before a still-pending backend attempt is hedged on another replica; `0` disables hedging |
+| `LLM_UPSTREAM_HEDGE_BUDGET_RATIO` | `0.2` | Hedge tokens earned per request (long-run cap on hedges as a fraction of requests) |
+| `LLM_UPSTREAM_HEDGE_BUDGET_BURST` | `10` | Maximum stored hedge tokens |
 
 Timeouts must be positive, finite numbers. A backend timeout is returned as `504` with
 `{"detail": "upstream <connect|read|write|pool> timeout"}`.
+
+Each attempt goes to the replica with the lowest `(in_flight + 1) * latency_ewma`; replicas
+that returned a 5xx or transport error are skipped for 1s. Failed attempts fail over to another
+replica (up to one attempt per replica). Slow attempts are hedged within the hedge budget and
+the first valid answer wins; losing attempts are cancelled. When every attempt fails the router
+returns `504` (all timed out), `503` (no replica reachable) or `502` (`{"detail": "upstream error"}`).
+`GET /v1/upstream/stats` reports requests, attempts, hedges, hedge wins, failovers and
+exhaustions so upstream amplification is visible.
 
 ## API
 

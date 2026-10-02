@@ -38,3 +38,28 @@ def upstream_timeout() -> httpx.Timeout:
         write=_timeout_seconds("write"),
         pool=_timeout_seconds("pool"),
     )
+
+
+def _non_negative_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a number, got {raw!r}") from None
+    if not 0 <= value < float("inf"):
+        raise ValueError(f"{name} must be a non-negative finite number, got {raw!r}")
+    return value
+
+
+def upstream_hedge_delay() -> float | None:
+    """Seconds before a slow attempt is hedged on another replica; None disables."""
+    ms = _non_negative_float("LLM_UPSTREAM_HEDGE_DELAY_MS", 200.0)
+    return ms / 1000 if ms > 0 else None
+
+
+def upstream_hedge_budget() -> tuple[float, float]:
+    """(ratio, burst) for the hedge token bucket."""
+    return (_non_negative_float("LLM_UPSTREAM_HEDGE_BUDGET_RATIO", 0.2),
+            _non_negative_float("LLM_UPSTREAM_HEDGE_BUDGET_BURST", 10.0))
