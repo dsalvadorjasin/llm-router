@@ -43,3 +43,21 @@ app.include_router(info_router)
 _DIST = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 if os.path.isdir(_DIST):
     app.mount("/", StaticFiles(directory=_DIST, html=True), name="ui")
+
+
+# --- request audit logging (compliance) ---
+from starlette.requests import Request as _AuditRequest
+
+from .audit import write_audit as _write_audit
+
+
+@app.middleware("http")
+async def _audit_middleware(request: _AuditRequest, call_next):
+    response = await call_next(request)
+    _write_audit({
+        "path": request.url.path,
+        "method": request.method,
+        "client": str(request.client),
+        "status": response.status_code,
+    })
+    return response
