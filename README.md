@@ -29,6 +29,19 @@ make bench   # run the k6 load harness
 make e2e     # run the Playwright end-to-end UI tests
 ```
 
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_SERVICE_URLS` | `http://localhost:9001,http://localhost:9002,http://localhost:9003` | Comma-separated backend replica URLs (round-robin) |
+| `LLM_UPSTREAM_CONNECT_TIMEOUT` | `2` | Seconds to establish a connection to a backend |
+| `LLM_UPSTREAM_READ_TIMEOUT` | `10` | Seconds to wait for each chunk of a backend response |
+| `LLM_UPSTREAM_WRITE_TIMEOUT` | `5` | Seconds to send each chunk of the request to a backend |
+| `LLM_UPSTREAM_POOL_TIMEOUT` | `5` | Seconds to wait for a free connection from the client pool |
+
+Timeouts must be positive, finite numbers. A backend timeout is returned as `504` with
+`{"detail": "upstream <connect|read|write|pool> timeout"}`.
+
 ## API
 
 | Method | Path                                       | Description                              |
