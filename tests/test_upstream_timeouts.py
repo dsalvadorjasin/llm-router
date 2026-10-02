@@ -130,13 +130,23 @@ def test_pool_client_uses_env_timeouts(monkeypatch):
 def test_hung_replica_read_timeout_returns_504_and_round_robin_continues(monkeypatch):
     monkeypatch.setenv("LLM_UPSTREAM_READ_TIMEOUT", "0.3")
     with _replica("hang") as hung, _replica("ok") as healthy:
-        pool = UpstreamPool(urls=[hung, healthy])
+        pool = UpstreamPool(urls=[hung, healthy], max_attempts=1)
         (t_hung, r_hung), (t_ok, r_ok) = _timed_forward(pool, n=2)
 
     assert r_hung == (504, {"detail": "upstream read timeout"})
     assert 0.25 <= t_hung < 2.0
     assert r_ok == (200, {"completion": "ok", "signature": "ab" * 32})
     assert t_ok < 1.0
+
+
+def test_hung_replica_read_timeout_fails_over_to_healthy_replica(monkeypatch):
+    monkeypatch.setenv("LLM_UPSTREAM_READ_TIMEOUT", "0.3")
+    with _replica("hang") as hung, _replica("ok") as healthy:
+        pool = UpstreamPool(urls=[hung, healthy])
+        [(elapsed, result)] = _timed_forward(pool)
+
+    assert result == (200, {"completion": "ok", "signature": "ab" * 32})
+    assert 0.25 <= elapsed < 2.0
 
 
 def test_stalled_response_body_hits_read_timeout():
