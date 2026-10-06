@@ -43,6 +43,26 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
+## Response cache
+
+`POST /v1/generate` responses are cached in memory. A response is cached only
+when it is a 2xx JSON object with a non-empty `completion` string and a
+`signature` matching `^[0-9a-f]{64}$`; the cache key is the full request
+payload, so `prompt`, `max_tokens`, and any other field distinguish entries.
+`POST /v1/chat` is not cached.
+
+Concurrent requests for the same payload share a single upstream call
+(single-flight). If the shared call fails or returns a non-cacheable response,
+each waiter falls through and makes its own upstream call — failures are never
+cached.
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `RESPONSE_CACHE_ENABLED` | `1` | Set to `0`/`false`/`no`/`off` to disable |
+| `RESPONSE_CACHE_TTL_S` | `300` | Seconds a cached entry stays valid (`<= 0` disables storing) |
+| `RESPONSE_CACHE_MAX_ENTRIES` | `1024` | LRU capacity (`<= 0` disables storing) |
+| `RESPONSE_CACHE_COALESCE` | `1` | Enable single-flight coalescing (only when the cache is enabled) |
+
 ## Layout
 
 - `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware
