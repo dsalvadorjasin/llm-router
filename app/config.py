@@ -59,3 +59,22 @@ def routing_config():
         tie_ratio=_env_float("ROUTER_TIE_RATIO", d.tie_ratio),
         tie_abs_ms=_env_float("ROUTER_TIE_ABS_MS", d.tie_abs_ms),
     )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def response_cache_enabled() -> bool:
+    return _env_bool("ROUTER_RESPONSE_CACHE", True)
+
+
+def response_cache_ttl_s() -> float:
+    return float(os.environ.get("ROUTER_RESPONSE_CACHE_TTL_S", "300"))
+
+
+def response_cache_max_entries() -> int:
+    return int(os.environ.get("ROUTER_RESPONSE_CACHE_MAX_ENTRIES", "4096"))

@@ -93,3 +93,12 @@ make e2e     # run the Playwright end-to-end UI tests
 - `scripts/` — helper scripts (e2e stack bootstrap)
 - `tests/` — backend unit tests (pytest)
 - `uv.lock` — locked Python dependencies
+
+## Router configuration
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `LLM_SERVICE_URLS` | `http://localhost:9001,...9003` | Comma-separated backend replicas |
+| `ROUTER_RESPONSE_CACHE` | `1` | Cache `/v1/generate` responses (keyed on prompt + max_tokens) with single-flight coalescing and retry on the next replica; `0` restores plain round-robin passthrough |
+| `ROUTER_RESPONSE_CACHE_TTL_S` | `300` | Cache entry TTL in seconds |
+| `ROUTER_RESPONSE_CACHE_MAX_ENTRIES` | `4096` | Max cached responses (LRU eviction) |
