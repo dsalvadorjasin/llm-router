@@ -43,6 +43,16 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
+## Latency strategies (combined)
+
+Three independently switchable strategies are on by default and compose as follows:
+
+1. **Response cache** (`app/cache.py`, `ROUTER_RESPONSE_CACHE`) sits in front of the pool on `/v1/generate`: hits and coalesced duplicates never reach a backend. A miss does a single `UpstreamPool.forward` when the pool already fails over (hedging or latency-aware routing on), otherwise it retries up to once per replica.
+2. **Latency-aware routing** (`app/routing.py`, `ROUTER_LATENCY_AWARE`) ranks replicas: it picks the primary and the hedge targets, and receives every attempt outcome (success, cancelled-as-lower-bound, failure).
+3. **Hedging** (`app/hedging.py`, `LLM_HEDGING`) drives timing and failover on top: duplicate after the adaptive hedge delay, immediate failover on errors, first valid response wins.
+
+With hedging off, the router alone does bounded, retried attempts; with routing off, the hedger uses its own round-robin/slow-replica ordering. Setting `LLM_HEDGING=0 ROUTER_LATENCY_AWARE=0 ROUTER_RESPONSE_CACHE=0` restores plain round-robin passthrough.
+
 ## Upstream hedging
 
 `UpstreamPool.forward` hedges requests across the backend replicas (`app/hedging.py`):
