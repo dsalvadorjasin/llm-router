@@ -43,9 +43,22 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
+## Response cache
+
+`POST /v1/generate` caches successful (HTTP 200) upstream responses in process, keyed on `(prompt, max_tokens)`. Errors and upstream exceptions are never cached. Concurrent requests for the same uncached key share one upstream call (coalescing); if that call fails, every waiter gets the same error and nothing is stored. Cached bodies are deep-copied on store and on read so callers can't mutate each other's responses. Responses carry an `X-Cache: HIT|MISS|COALESCED` header. `/v1/chat` is not cached.
+
+Configured via environment variables:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `RESPONSE_CACHE_ENABLED` | `1` | `0`/`false`/`no`/`off` disables the cache: every request is forwarded round-robin as before, with no `X-Cache` header |
+| `RESPONSE_CACHE_TTL_S` | `300` | Seconds an entry stays valid |
+| `RESPONSE_CACHE_MAX_ENTRIES` | `1024` | Max entries; least recently used are evicted beyond this |
+| `RESPONSE_CACHE_COALESCE` | `1` | Set to `0` to send concurrent same-key misses upstream independently |
+
 ## Layout
 
-- `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware
+- `app/` — FastAPI gateway: generate/chat/info routes, response cache, conversation store, markdown export, request logging middleware
 - `bench/` — k6 load test script and weighted workload
 - `docker-compose.yml` — backend fleet service definitions
 - `frontend/` — React + TypeScript playground UI (Vite, Vitest, Testing Library, Playwright)
