@@ -56,8 +56,8 @@ replica's score; ties prefer untried replicas and then the least recently picked
 `HEDGE_REUSE_REPLICAS` applies only with `ROUTER_STRATEGY=latency`; set it to `0`
 to retain the behavior of excluding tried replicas. With `round_robin`, later
 attempts continue the rotating selection among untried replicas. The first
-attempt still uses the latency selector, and pinned prompts continue to use
-their pinned replica. The first well-formed 2xx response wins and outstanding
+attempt follows `ROUTER_STRATEGY`, and pinned prompts continue to use their
+pinned replica. The first well-formed 2xx response wins and outstanding
 attempts are cancelled. Failures fail over immediately; 4xx responses are
 returned without a retry. Repeated prompts with divergent backend signatures
 remain pinned to the first replica that served them.
