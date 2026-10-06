@@ -64,6 +64,24 @@ make e2e     # run the Playwright end-to-end UI tests
 | `LLM_HEDGE_SLOW_FACTOR` | `2.0` | replica is deprioritised when its EWMA > best × factor + 50 ms |
 | `LLM_HEDGE_PROBE_INTERVAL_S` | `2.0` | after this long without samples a replica's stats are ignored |
 
+## Upstream routing
+
+`app/routing.py` picks a backend replica per attempt by an EWMA of its observed latency (failed or timed-out attempts count as penalised samples). Replicas within the tie band of the best score are used in round-robin order; a deprioritised replica's penalty decays over time so it is probed again and gets traffic back once it recovers. Each attempt has an adaptive timeout (a multiple of a high quantile of recent successful latencies); timeouts, transport errors and non-200s are retried on another replica.
+
+| Env var | Default | Meaning |
+|---------|---------|---------|
+| `ROUTER_LATENCY_AWARE` | `1` | `0` restores plain round-robin with no timeouts or retries |
+| `ROUTER_POLICY` | `ewma` | `ewma`, `least_outstanding` or `round_robin` |
+| `ROUTER_MAX_ATTEMPTS` | `4` | Attempts per request (each on a different replica than the previous one) |
+| `ROUTER_ATTEMPT_TIMEOUT_MS` | `250` | Per-attempt timeout until enough samples are collected |
+| `ROUTER_ATTEMPT_TIMEOUT_MIN_MS` / `_MAX_MS` | `50` / `1000` | Clamp for the adaptive per-attempt timeout |
+| `ROUTER_TIMEOUT_QUANTILE` / `ROUTER_TIMEOUT_MULTIPLIER` | `0.99` / `1.03` | Adaptive timeout = quantile of recent successful latencies x multiplier |
+| `ROUTER_FINAL_TIMEOUT_MS` | `10000` | Timeout of the last attempt |
+| `ROUTER_EWMA_ALPHA` | `0.3` | EWMA smoothing factor |
+| `ROUTER_FAILURE_PENALTY` | `2.0` | Failed attempt is recorded as `max(elapsed, timeout) x penalty` |
+| `ROUTER_DECAY_HALF_LIFE_S` | `10` | Half-life of a replica's excess score while it gets no traffic |
+| `ROUTER_TIE_RATIO` / `ROUTER_TIE_ABS_MS` | `1.5` / `10` | Scores within `best x ratio` or `best + abs` count as tied |
+
 ## Layout
 
 - `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware

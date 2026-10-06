@@ -9,6 +9,10 @@ remaining in-flight attempts are cancelled.
 The hedge delay is a quantile of recent attempt latencies on healthy replicas
 (or a fixed value). Slow replicas are re-tried as primary once their stats go
 stale, so a replica that recovers is picked up again.
+
+When a LatencyAwareRouter is passed in, it replaces the built-in replica health
+logic: the router ranks replicas (primary and hedge targets), and every attempt
+outcome is fed back into it.
 """
 import asyncio
 import re
@@ -63,8 +67,10 @@ def is_valid(status: int, body) -> bool:
 
 class Hedger:
     def __init__(self, urls: list[str], client: httpx.AsyncClient,
-                 settings: HedgeSettings | None = None, clock=time.monotonic):
+                 settings: HedgeSettings | None = None, clock=time.monotonic,
+                 router=None):
         self._urls = list(urls)
+        self._router = router
         self._client = client
         self._s = settings or HedgeSettings()
         self._clock = clock
@@ -83,6 +89,15 @@ class Hedger:
         return {u for u, ms in fresh.items() if ms > limit}
 
     def _record(self, url: str, elapsed_ms: float, censored: bool) -> None:
+        if self._router is not None:
+            idx = self._router.index(url)
+            if censored:
+                self._router.record_censored(idx, elapsed_ms)
+            else:
+                self._router.record_success(idx, elapsed_ms)
+            if self._router.is_fast(url):
+                self._samples.append(elapsed_ms)
+            return
         st = self._stats[url]
         if st.ewma_ms is None:
             st.ewma_ms = elapsed_ms
@@ -99,7 +114,11 @@ class Hedger:
         if url not in self._slow(st.last_sample):
             self._samples.append(elapsed_ms)
 
-    def _record_failure(self, url: str) -> None:
+    def _record_failure(self, url: str, elapsed_ms: float = 0.0) -> None:
+        if self._router is not None:
+            self._router.record_failure(self._router.index(url), elapsed_ms,
+                                        self._router.attempt_timeout_ms())
+            return
         st = self._stats[url]
         penalty_ms = self._s.attempt_timeout_s * 1000
         st.ewma_ms = penalty_ms if st.ewma_ms is None else max(st.ewma_ms, penalty_ms)
@@ -120,10 +139,13 @@ class Hedger:
         n = len(self._urls)
         start = self._cursor % n
         self._cursor += 1
-        rotation = self._urls[start:] + self._urls[:start]
-        slow = self._slow(self._clock())
-        healthy = [u for u in rotation if u not in slow]
-        degraded = [u for u in rotation if u in slow]
+        if self._router is not None:
+            healthy, degraded = self._router.rank()
+        else:
+            rotation = self._urls[start:] + self._urls[:start]
+            slow = self._slow(self._clock())
+            healthy = [u for u in rotation if u not in slow]
+            degraded = [u for u in rotation if u in slow]
         if not healthy:
             healthy, degraded = degraded, []
         hedged = [healthy[i % len(healthy)] for i in range(max(1, self._s.max_hedged_attempts))]
@@ -131,10 +153,17 @@ class Hedger:
 
     # ---- forwarding -----------------------------------------------------
     async def _post(self, url: str, payload: dict) -> tuple[int, dict]:
-        resp = await asyncio.wait_for(
-            self._client.post(f"{url}/v1/completions", json=payload,
-                              timeout=self._s.attempt_timeout_s),
-            timeout=self._s.attempt_timeout_s)
+        replica = self._router._replicas[self._router.index(url)] if self._router else None
+        if replica is not None:
+            replica.outstanding += 1
+        try:
+            resp = await asyncio.wait_for(
+                self._client.post(f"{url}/v1/completions", json=payload,
+                                  timeout=self._s.attempt_timeout_s),
+                timeout=self._s.attempt_timeout_s)
+        finally:
+            if replica is not None:
+                replica.outstanding -= 1
         try:
             body = resp.json()
         except ValueError:
@@ -182,7 +211,7 @@ class Hedger:
                     if is_valid(status, body):
                         self._record(a.url, elapsed_ms, censored=False)
                         return status, body
-                    self._record_failure(a.url)
+                    self._record_failure(a.url, elapsed_ms)
                     last = (status, body)
                     if next_idx < len(plan):
                         launch()
