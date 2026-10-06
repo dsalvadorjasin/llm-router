@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 
 import httpx
@@ -309,6 +310,76 @@ def test_hedge_targets_lower_score_non_primary_replica():
     assert fleet.hits == ["u1", "u3"]
 
 
+def _replica_reuse_transport():
+    hits = []
+    calls = {}
+
+    async def handler(request):
+        host = _host(request)
+        hits.append(host)
+        calls[host] = calls.get(host, 0) + 1
+        if host in {"u1", "u2"} and calls[host] == 1:
+            delay = 2.0
+        elif host == "u3":
+            delay = 1.4
+        else:
+            delay = 0.01
+        await asyncio.sleep(delay)
+        return _ok(completion=f"{host}-{calls[host]}")
+
+    return httpx.MockTransport(handler), hits
+
+
+def _run_replica_reuse_case(reuse_replicas):
+    transport, hits = _replica_reuse_transport()
+    pool = UpstreamPool(
+        URLS,
+        transport,
+        _settings(
+            delay_ms=50,
+            adaptive=False,
+            max_attempts=3,
+            reuse_replicas=reuse_replicas,
+        ),
+        explore_rate=0.0,
+        probe_interval_s=60.0,
+        attempt_timeout_s=5,
+        rng=random.Random(1),
+    )
+    now = time.monotonic()
+    for replica, sample in zip(pool._replicas, (0.1, 0.1, 1.4)):
+        replica.ewma = sample
+        replica.last_sample = now
+        replica.last_pick = now
+
+    async def go():
+        start = time.monotonic()
+        result = await pool.forward({"prompt": "p", "max_tokens": 8})
+        elapsed = time.monotonic() - start
+        await pool.aclose()
+        return result, elapsed
+
+    result, elapsed = _run(go())
+    return result, elapsed, hits
+
+
+def test_later_hedges_reuse_fast_replica_when_enabled():
+    (status, body), elapsed, hits = _run_replica_reuse_case(True)
+
+    assert status == 200
+    assert elapsed < 0.5
+    assert hits == ["u1", "u2", "u1"]
+    assert body["completion"] == "u1-2"
+
+
+def test_later_hedges_keep_excluding_tried_replicas_when_reuse_disabled():
+    (status, body), _, hits = _run_replica_reuse_case(False)
+
+    assert status == 200
+    assert hits == ["u1", "u2", "u3"]
+    assert body["completion"] == "u3-1"
+
+
 def test_cancelled_hedge_loser_is_not_failed_or_timeout_penalized():
     fleet = FakeFleet(
         {
@@ -340,11 +411,45 @@ def test_hedge_settings_from_env(monkeypatch):
     monkeypatch.setenv("HEDGE_ENABLED", "0")
     monkeypatch.setenv("HEDGE_DELAY_MS", "250")
     monkeypatch.setenv("HEDGE_MAX_ATTEMPTS", "2")
+    monkeypatch.setenv("HEDGE_REUSE_REPLICAS", "0")
     s = hedge_settings()
     assert (s.enabled, s.delay_ms, s.max_attempts) == (False, 250.0, 2)
+    assert s.reuse_replicas is False
     monkeypatch.delenv("HEDGE_ENABLED")
     assert hedge_settings().enabled is True
+    monkeypatch.delenv("HEDGE_REUSE_REPLICAS")
+    assert hedge_settings().reuse_replicas is True
 
 
 def test_hedge_settings_default_percentile():
     assert HedgeSettings().percentile == 0.5
+
+
+def test_hedge_delay_uses_clamped_cold_delay_until_minimum_samples():
+    pool = UpstreamPool(
+        URLS,
+        httpx.MockTransport(lambda r: _ok()),
+        _settings(
+            adaptive=True,
+            delay_ms=25,
+            percentile=0.5,
+            min_samples=5,
+            min_delay_ms=50,
+            max_delay_ms=250,
+        ),
+    )
+    assert pool.hedge_delay() == pytest.approx(0.05)
+    for sample in (0.08, 0.12, 0.16, 0.20):
+        pool._record(pool._replicas[0], sample, ok=True)
+    assert pool.hedge_delay() == pytest.approx(0.05)
+    pool._record(pool._replicas[0], 0.32, ok=True)
+    assert pool.hedge_delay() == pytest.approx(0.16)
+    _run(pool.aclose())
+
+
+def test_hedge_settings_default_delay_and_minimum_samples():
+    settings = HedgeSettings()
+
+    assert settings.delay_ms == 150.0
+    assert settings.min_samples == 5
+    assert settings.reuse_replicas is True

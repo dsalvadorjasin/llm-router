@@ -140,12 +140,13 @@ class ResponseCache:
             def _cleanup(t: asyncio.Task, key: str = key, task: asyncio.Task = task) -> None:
                 if self._inflight.get(key) is task:
                     del self._inflight[key]
-                if not t.cancelled():
-                    t.exception()
+                if t.cancelled():
+                    return
+                if t.exception() is None:
+                    self._store(key, *t.result())
 
             task.add_done_callback(_cleanup)
             status, body = await asyncio.shield(task)
-            self._store(key, status, body)
             return status, body
 
         self._stats.coalesced += 1

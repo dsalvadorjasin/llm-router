@@ -75,14 +75,15 @@ def max_attempts() -> int:
 @dataclass(frozen=True)
 class HedgeSettings:
     enabled: bool = True
-    delay_ms: float = 400.0
+    delay_ms: float = 150.0
     adaptive: bool = True
     percentile: float = 0.5
     min_delay_ms: float = 50.0
     max_delay_ms: float = 1000.0
-    min_samples: int = 20
+    min_samples: int = 5
     window: int = 512
     max_attempts: int = 3
+    reuse_replicas: bool = True
     signature_guard: bool = True
     signature_memo_size: int = 10_000
 
@@ -99,6 +100,7 @@ def hedge_settings() -> HedgeSettings:
         min_samples=_env_int("HEDGE_MIN_SAMPLES", d.min_samples),
         window=_env_int("HEDGE_WINDOW", d.window),
         max_attempts=max(1, _env_int("HEDGE_MAX_ATTEMPTS", d.max_attempts)),
+        reuse_replicas=_env_bool("HEDGE_REUSE_REPLICAS", d.reuse_replicas),
         signature_guard=_env_bool("HEDGE_SIGNATURE_GUARD", d.signature_guard),
         signature_memo_size=_env_int("HEDGE_SIGNATURE_MEMO_SIZE", d.signature_memo_size),
     )

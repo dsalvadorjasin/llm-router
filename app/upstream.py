@@ -310,16 +310,27 @@ class UpstreamPool:
             start = self._clock()
             replica.last_pick = start
             replica.pending[attempt_id] = start
-            outcome = await self._attempt(idx, payload)
-            replica.pending.pop(attempt_id, None)
+            try:
+                outcome = await self._attempt(idx, payload)
+            finally:
+                replica.pending.pop(attempt_id, None)
             elapsed = max(0.0, outcome.finished_at - start)
             if (
                 outcome.error is None
                 and outcome.status is not None
                 and outcome.status < 500
             ):
-                self._record(replica, elapsed, ok=True, sample_delay=False)
-                return outcome.status, self._response_body(outcome)
+                malformed_completion = (
+                    200 <= outcome.status < 300
+                    and not (
+                        isinstance(outcome.body, dict)
+                        and isinstance(outcome.body.get("completion"), str)
+                        and outcome.body["completion"] != ""
+                    )
+                )
+                if not malformed_completion:
+                    self._record(replica, elapsed, ok=True, sample_delay=False)
+                    return outcome.status, self._response_body(outcome)
             self._record(replica, elapsed, ok=False)
             last = outcome
             if limit > len(tried):
@@ -383,7 +394,29 @@ class UpstreamPool:
 
         def launch() -> None:
             nonlocal attempts
-            idx = self._hedged_pick(tried, failed, pinned)
+            if (
+                attempts > 0
+                and settings.reuse_replicas
+                and pinned is None
+            ):
+                candidates = [
+                    idx
+                    for idx in range(len(self._replicas))
+                    if idx not in failed
+                ]
+                if not candidates:
+                    candidates = list(range(len(self._replicas)))
+                now = self._clock()
+                idx = min(
+                    candidates,
+                    key=lambda candidate: (
+                        self._score(candidate, now),
+                        candidate in tried,
+                        self._replicas[candidate].last_pick,
+                    ),
+                )
+            else:
+                idx = self._hedged_pick(tried, failed, pinned)
             tried.add(idx)
             attempts += 1
             attempt_id = next(self._ids)

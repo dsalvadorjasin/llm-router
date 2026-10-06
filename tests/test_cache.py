@@ -277,6 +277,39 @@ def test_leader_cancellation_waiters_still_served():
     assert len(calls) == 1
 
 
+def test_cancelled_leader_fetch_still_populates_cache():
+    calls = []
+    cache = ResponseCache(ttl_s=60, max_entries=10)
+
+    async def run():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fetch(payload):
+            calls.append(payload)
+            started.set()
+            await release.wait()
+            return 200, dict(VALID)
+
+        leader = asyncio.create_task(cache.get_or_fetch({"prompt": "p"}, fetch))
+        await started.wait()
+        leader.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await leader
+
+        release.set()
+        while cache._inflight:
+            await asyncio.sleep(0)
+
+        result = await cache.get_or_fetch({"prompt": "p"}, fetch)
+        return result
+
+    assert asyncio.run(run()) == (200, VALID)
+    assert len(calls) == 1
+    assert cache.stats.hits == 1
+    assert cache.stats.stores == 1
+
+
 def test_zero_ttl_never_stores():
     calls = []
     cache = ResponseCache(ttl_s=0, max_entries=10)
