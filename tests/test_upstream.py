@@ -2,7 +2,7 @@ import asyncio
 
 import httpx
 
-from app.config import upstream_urls
+from app.config import HedgeSettings, upstream_urls
 from app.upstream import UpstreamPool
 
 
@@ -28,10 +28,11 @@ def _recording_transport(hits: list[str]) -> httpx.MockTransport:
     return httpx.MockTransport(handler)
 
 
-def test_round_robin_and_passthrough():
+def test_round_robin_and_passthrough_when_hedging_disabled():
     hits: list[str] = []
     urls = ["http://u1:9000", "http://u2:9000", "http://u3:9000"]
-    pool = UpstreamPool(urls=urls, transport=_recording_transport(hits))
+    pool = UpstreamPool(urls=urls, transport=_recording_transport(hits),
+                        settings=HedgeSettings(enabled=False))
 
     async def run():
         results = [await pool.forward({"prompt": "p"}) for _ in range(4)]
