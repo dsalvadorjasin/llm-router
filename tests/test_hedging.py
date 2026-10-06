@@ -377,6 +377,40 @@ def test_measured_slow_replica_stops_being_primary():
     assert lat["http://r2:9000"] > lat["http://r3:9000"]
 
 
+class _AlwaysExplore(random.Random):
+    """Forces the first attempt onto replica 0."""
+
+    def random(self):
+        return 0.0
+
+    def randrange(self, *args, **kwargs):
+        return 0
+
+
+def test_unmeasured_replica_with_stuck_attempt_is_not_rehedged():
+    """Cold start: a replica with no completed sample yet is scored by its pending attempts."""
+    fleet = FakeFleet(latency_s={"r1": 1.0})
+    pool = UpstreamPool(urls=URLS, transport=fleet.transport(),
+                        hedge=HedgeConfig(delays_ms=(30.0, 60.0, 90.0), explore=1.0),
+                        rng=_AlwaysExplore())
+    pool._ewma_ms = [None, 20.0, 20.0]
+
+    async def go():
+        t0 = time.monotonic()
+        result = await pool.forward({"prompt": "p"})
+        elapsed = time.monotonic() - t0
+        await pool.aclose()
+        return result, elapsed
+
+    (status, body), elapsed = run(go())
+    assert status == 200
+    assert fleet.hits[0] == "r1"
+    assert fleet.hits.count("r1") == 1
+    assert body["completion"] != "from r1"
+    assert elapsed < 0.5
+    assert pool._inflight == [{}, {}, {}]
+
+
 def test_signature_is_passed_through_untouched():
     body = {"completion": "c", "signature": _sig("orig"), "id": "cmpl-1", "usage": {"t": 1}}
     fleet = FakeFleet(body={h: body for h in ("r1", "r2", "r3")})

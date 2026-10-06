@@ -48,6 +48,7 @@ class UpstreamPool:
         self._client = httpx.AsyncClient(timeout=timeout, transport=transport)
         self._rng = rng or random.Random()
         self._ewma_ms: list[float | None] = [None] * len(self._url_list)
+        self._inflight: list[dict[object, float]] = [{} for _ in self._url_list]
         # prompt key -> [replica index, confirmed by a valid response]
         self._affinity: OrderedDict[str, list] = OrderedDict()
         self.stats: Counter[str] = Counter()
@@ -113,6 +114,10 @@ class UpstreamPool:
                         status, body = task.result()
                         if is_valid_completion(status, body):
                             self.stats[f"wins_attempt_{ordinal}"] += 1
+                            if ordinal > 1 or len(tasks):
+                                log.debug("hedged request won by attempt %d on %s after %.0f ms (tried %s)",
+                                          ordinal, self._url_list[idx],
+                                          (time.monotonic() - start) * 1000, uses)
                             confirmed = True
                             self._affinity_confirm(key, idx)
                             return status, body
@@ -141,6 +146,8 @@ class UpstreamPool:
     async def _attempt(self, idx: int, payload: dict) -> tuple[int, dict]:
         url = self._url_list[idx]
         t0 = time.monotonic()
+        token = object()
+        self._inflight[idx][token] = t0
         try:
             resp = await self._client.post(f"{url}/v1/completions", json=payload)
         except asyncio.CancelledError:
@@ -152,6 +159,8 @@ class UpstreamPool:
         except httpx.HTTPError as exc:
             self._observe_failure(idx, (time.monotonic() - t0) * 1000)
             return 502, {"detail": f"upstream error: {type(exc).__name__}"}
+        finally:
+            self._inflight[idx].pop(token, None)
         elapsed_ms = (time.monotonic() - t0) * 1000
         try:
             body = resp.json()
@@ -165,7 +174,13 @@ class UpstreamPool:
 
     def _score(self, idx: int) -> float:
         ewma = self._ewma_ms[idx]
-        return 0.0 if ewma is None else ewma
+        if ewma is not None:
+            return ewma
+        # no completed sample yet: the oldest pending attempt is a lower bound
+        pending = self._inflight[idx]
+        if not pending:
+            return 0.0
+        return (time.monotonic() - min(pending.values())) * 1000
 
     def _pick(self, uses: list[int], first: bool) -> int:
         n = len(self._url_list)

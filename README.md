@@ -47,7 +47,7 @@ make e2e     # run the Playwright end-to-end UI tests
 
 `/v1/generate` and `/v1/chat` forward through `UpstreamPool` (`app/upstream.py`), which hedges by default:
 
-- The first attempt goes to the better of two randomly sampled replicas, scored by a runtime EWMA of observed latency (cancelled attempts count as "at least this slow"; failures are penalised). A small `explore` share of first attempts goes to a random replica so scores keep updating.
+- The first attempt goes to the better of two randomly sampled replicas, scored by a runtime EWMA of observed latency (cancelled attempts count as "at least this slow"; failures are penalised; a replica with no completed sample yet is scored by the age of its oldest pending attempt). A small `explore` share of first attempts goes to a random replica so scores keep updating.
 - If no valid response (HTTP 200 with a non-empty `completion` and, when present, a non-empty `signature`) has arrived by each offset in `LLM_HEDGE_DELAYS_MS`, a duplicate is sent to the replica expected to answer fastest, preferring ones not yet tried for this request.
 - The first valid response wins and is returned unmodified; every other in-flight attempt is cancelled. Transport errors, 5xx and malformed bodies trigger the next attempt immediately; 4xx are returned as-is without duplicates. When every attempt fails, the last upstream error is returned (504 if the deadline expires).
 
