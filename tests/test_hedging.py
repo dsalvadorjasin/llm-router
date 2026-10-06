@@ -393,7 +393,13 @@ def test_cancelled_hedge_loser_is_not_failed_or_timeout_penalized():
         fleet.transport(),
         _settings(delay_ms=20, max_attempts=2),
         attempt_timeout_s=0.5,
+        explore_rate=0.0,
+        probe_interval_s=60.0,
+        rng=random.Random(1),
     )
+    for replica, sample in zip(pool._replicas, (0.1, 0.15, 0.5)):
+        pool._record(replica, sample, ok=True, sample_delay=False)
+        replica.last_pick = time.monotonic()
 
     async def go():
         result = await pool.forward({"prompt": "p", "max_tokens": 8})
@@ -403,8 +409,88 @@ def test_cancelled_hedge_loser_is_not_failed_or_timeout_penalized():
     status, _ = _run(go())
     assert status == 200
     assert pool._replicas[0].failing is False
-    assert pool._replicas[0].ewma is not None
-    assert pool._replicas[0].ewma < 0.5
+    assert pool._replicas[0].ewma == pytest.approx(0.1)
+    assert pool._replicas[0].floor == 0.0
+
+
+def test_cancelled_unmeasured_attempt_sets_floor_until_real_outcome():
+    now = [10.0]
+    pool = UpstreamPool(
+        URLS,
+        httpx.MockTransport(lambda r: _ok()),
+        _settings(),
+        clock=lambda: now[0],
+    )
+    replica = pool._replicas[0]
+
+    pool._record(replica, 0.12, ok=True, cancelled=True)
+    pool._record(replica, 0.08, ok=True, cancelled=True)
+    assert replica.ewma is None
+    assert replica.floor == pytest.approx(0.12)
+    assert pool._score(0, now[0]) == pytest.approx(0.12)
+
+    pool._record(replica, 0.03, ok=True)
+    assert replica.ewma == pytest.approx(0.03)
+    assert replica.floor == 0.0
+    _run(pool.aclose())
+
+
+def test_cold_start_hedges_do_not_concentrate_on_slow_replica():
+    active_slow = 0
+    max_active_slow = 0
+    hits = {"u1": 0, "u2": 0, "u3": 0}
+
+    async def handler(request):
+        nonlocal active_slow, max_active_slow
+        host = _host(request)
+        hits[host] += 1
+        if host == "u3":
+            active_slow += 1
+            max_active_slow = max(max_active_slow, active_slow)
+            try:
+                await asyncio.sleep(0.5)
+            finally:
+                active_slow -= 1
+        else:
+            await asyncio.sleep(0.02)
+        return _ok(completion=host)
+
+    pool = UpstreamPool(
+        URLS,
+        httpx.MockTransport(handler),
+        HedgeSettings(delay_ms=50, adaptive=False, max_attempts=3),
+        explore_rate=0.0,
+        probe_interval_s=5.0,
+        rng=random.Random(1),
+    )
+    assert all(replica.ewma is None for replica in pool._replicas)
+    pool._record(
+        pool._replicas[2],
+        0.005,
+        ok=True,
+        sample_delay=False,
+        cancelled=True,
+    )
+
+    async def go():
+        async def request(index):
+            await asyncio.sleep(index * 0.01)
+            started = time.monotonic()
+            status, _ = await pool.forward(
+                {"prompt": f"cold-{index}", "max_tokens": 8}
+            )
+            assert status == 200
+            return time.monotonic() - started
+
+        latencies = await asyncio.gather(*(request(index) for index in range(30)))
+        await pool.aclose()
+        return latencies
+
+    latencies = _run(go())
+
+    assert all(elapsed < 0.3 for elapsed in latencies)
+    assert hits["u3"] > 0
+    assert max_active_slow <= 2
 
 
 def test_hedge_settings_from_env(monkeypatch):

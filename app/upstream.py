@@ -20,6 +20,7 @@ log = logging.getLogger("app.upstream")
 class _Replica:
     url: str
     ewma: float | None = None
+    floor: float = 0.0
     last_sample: float = 0.0
     failing: bool = False
     last_pick: float = 0.0
@@ -172,10 +173,13 @@ class UpstreamPool:
     ) -> None:
         now = self._clock()
         if cancelled:
-            if replica.ewma is None or elapsed > replica.ewma:
+            if replica.ewma is None:
+                replica.floor = max(replica.floor, elapsed)
+            elif elapsed > replica.ewma:
                 self._update_ewma(replica, elapsed, now)
             return
 
+        replica.floor = 0.0
         if not ok:
             self._update_ewma(
                 replica, max(elapsed, self._attempt_timeout), now
@@ -195,7 +199,10 @@ class UpstreamPool:
     def _score(self, idx: int, now: float) -> float:
         replica = self._replicas[idx]
         if replica.ewma is None:
-            latency = now - min(replica.pending.values(), default=now)
+            latency = max(
+                replica.floor,
+                now - min(replica.pending.values(), default=now),
+            )
         else:
             latency = replica.ewma
         return latency * (replica.inflight + 1)
@@ -406,15 +413,23 @@ class UpstreamPool:
                 ]
                 if not candidates:
                     candidates = list(range(len(self._replicas)))
-                now = self._clock()
-                idx = min(
-                    candidates,
-                    key=lambda candidate: (
-                        self._score(candidate, now),
-                        candidate in tried,
-                        self._replicas[candidate].last_pick,
-                    ),
-                )
+                candidates = [
+                    idx
+                    for idx in candidates
+                    if self._replicas[idx].ewma is not None or idx not in tried
+                ]
+                if not candidates:
+                    idx = self._hedged_pick(tried, failed, pinned)
+                else:
+                    now = self._clock()
+                    idx = min(
+                        candidates,
+                        key=lambda candidate: (
+                            self._score(candidate, now),
+                            candidate in tried,
+                            self._replicas[candidate].last_pick,
+                        ),
+                    )
             else:
                 idx = self._hedged_pick(tried, failed, pinned)
             tried.add(idx)
