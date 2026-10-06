@@ -227,7 +227,10 @@ class UpstreamPool:
             for idx in candidates
             if self._replicas[idx].inflight == 0
             and (
-                self._replicas[idx].ewma is None
+                (
+                    self._replicas[idx].ewma is None
+                    and self._replicas[idx].floor == 0.0
+                )
                 or now - self._replicas[idx].last_pick >= self._probe_interval
             )
         ]
@@ -405,6 +408,7 @@ class UpstreamPool:
                 attempts > 0
                 and settings.reuse_replicas
                 and pinned is None
+                and self.strategy == "latency"
             ):
                 candidates = [
                     idx

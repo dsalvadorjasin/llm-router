@@ -236,6 +236,33 @@ def test_unmeasured_replica_is_not_treated_as_fastest():
     _run(pool.aclose())
 
 
+def test_cold_replica_floor_suppresses_idle_probe():
+    now = [10.0]
+    pool = UpstreamPool(
+        URLS,
+        httpx.MockTransport(lambda r: _ok()),
+        _settings(),
+        explore_rate=0.0,
+        probe_interval_s=5.0,
+        rng=random.Random(1),
+        clock=lambda: now[0],
+    )
+    cold = pool._replicas[0]
+    cold.floor = 0.25
+    cold.last_pick = now[0]
+    measured = pool._replicas[1]
+    measured.ewma = 0.1
+    measured.last_pick = now[0]
+
+    assert cold.ewma is None
+    assert cold.inflight == 0
+    assert pool._pick({2}) == 1
+
+    cold.floor = 0.0
+    assert pool._pick({2}) == 0
+    _run(pool.aclose())
+
+
 def test_slow_replica_is_probed_then_fast_sample_dominates():
     now = [0.0]
     pool = UpstreamPool(
@@ -378,6 +405,41 @@ def test_later_hedges_keep_excluding_tried_replicas_when_reuse_disabled():
     assert status == 200
     assert hits == ["u1", "u2", "u3"]
     assert body["completion"] == "u3-1"
+
+
+def test_round_robin_hedges_choose_untried_replicas_in_order_with_reuse_enabled():
+    hits = []
+
+    async def handler(request):
+        host = _host(request)
+        hits.append(host)
+        await asyncio.sleep(0.01 if host == "u3" else 0.2)
+        return _ok(completion=host)
+
+    pool = UpstreamPool(
+        URLS,
+        httpx.MockTransport(handler),
+        _settings(delay_ms=20, max_attempts=3, reuse_replicas=True),
+        strategy="round_robin",
+        explore_rate=0.0,
+        probe_interval_s=60.0,
+        rng=random.Random(1),
+    )
+    now = time.monotonic()
+    for replica, sample in zip(pool._replicas, (0.01, 0.2, 0.5)):
+        replica.ewma = sample
+        replica.last_sample = now
+        replica.last_pick = now
+
+    async def go():
+        result = await pool.forward({"prompt": "p", "max_tokens": 8})
+        await pool.aclose()
+        return result
+
+    status, body = _run(go())
+
+    assert status == 200 and body["completion"] == "u3"
+    assert hits == ["u1", "u2", "u3"]
 
 
 def test_cancelled_hedge_loser_is_not_failed_or_timeout_penalized():

@@ -53,9 +53,11 @@ If the primary has not returned a well-formed completion by the hedge delay, a
 later attempt normally uses the lowest-scored replica that has not failed,
 including replicas already tried by this request. In-flight attempts increase a
 replica's score; ties prefer untried replicas and then the least recently picked.
-Set `HEDGE_REUSE_REPLICAS=0` to retain the behavior of excluding tried replicas.
-The first attempt still uses the latency selector, and pinned prompts continue to
-use their pinned replica. The first well-formed 2xx response wins and outstanding
+`HEDGE_REUSE_REPLICAS` applies only with `ROUTER_STRATEGY=latency`; set it to `0`
+to retain the behavior of excluding tried replicas. With `round_robin`, later
+attempts continue the rotating selection among untried replicas. The first
+attempt still uses the latency selector, and pinned prompts continue to use
+their pinned replica. The first well-formed 2xx response wins and outstanding
 attempts are cancelled. Failures fail over immediately; 4xx responses are
 returned without a retry. Repeated prompts with divergent backend signatures
 remain pinned to the first replica that served them.
