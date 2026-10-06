@@ -2,8 +2,13 @@ from itertools import cycle
 
 import httpx
 
-from .config import (hedge_settings, hedging_enabled, latency_aware_enabled,
-                     routing_config, upstream_urls)
+from .config import (
+    hedge_settings,
+    hedging_enabled,
+    latency_aware_enabled,
+    routing_config,
+    upstream_urls,
+)
 from .hedging import Hedger, HedgeSettings
 from .routing import LatencyAwareRouter
 
