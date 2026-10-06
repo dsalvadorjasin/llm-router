@@ -31,8 +31,12 @@ def _recording_transport(hits: list[str]) -> httpx.MockTransport:
 def test_round_robin_and_passthrough_when_hedging_disabled():
     hits: list[str] = []
     urls = ["http://u1:9000", "http://u2:9000", "http://u3:9000"]
-    pool = UpstreamPool(urls=urls, transport=_recording_transport(hits),
-                        settings=HedgeSettings(enabled=False))
+    pool = UpstreamPool(
+        urls=urls,
+        transport=_recording_transport(hits),
+        settings=HedgeSettings(enabled=False),
+        strategy="round_robin",
+    )
 
     async def run():
         results = [await pool.forward({"prompt": "p"}) for _ in range(4)]

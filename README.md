@@ -43,31 +43,47 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
-## Upstream hedging
+## Latency strategies
 
-`/v1/generate` and `/v1/chat` go through `UpstreamPool` (`app/upstream.py`). Each request is sent to the
-replica with the lowest score (latency EWMA x in-flight attempts; unmeasured replicas get the pool median as a
-neutral prior, idle replicas' estimates relax back toward the median so no replica is excluded for good). If no
-valid response (2xx JSON with non-empty `completion` and `signature`) arrives within the hedge delay, a duplicate
-goes to another replica; the first valid response wins and the rest are cancelled. Failed attempts fail over
-immediately. Backend signatures are deterministic across replicas; if the router ever sees a replica return a
-different signature for a repeated `(prompt, max_tokens)`, it rejects that response and pins the prompt to the
-replica that first served it.
+Requests flow through the response cache and single-flight coalescer first when the
+cache is enabled. A cache miss is dispatched through `UpstreamPool`: the latency
+selector chooses a primary replica using latency EWMA multiplied by in-flight
+attempts, with cold-start and idle probes, exploration, and power-of-two choices.
+If the primary has not returned a well-formed completion by the hedge delay, a
+hedged attempt uses the same selector while excluding replicas already tried for
+the request. The first well-formed 2xx response wins and outstanding attempts are
+cancelled. Failures fail over immediately; 4xx responses are returned without a
+retry. Repeated prompts with divergent backend signatures remain pinned to the
+first replica that served them.
 
-| Env var | Default | Meaning |
-|---------|---------|---------|
-| `HEDGE_ENABLED` | `1` | `0` = plain round-robin with failover on 5xx/transport errors |
-| `HEDGE_DELAY_MS` | `400` | Hedge delay before enough samples exist (or always, if not adaptive) |
-| `HEDGE_ADAPTIVE` | `1` | Use a percentile of recent successful attempt latencies as the delay |
-| `HEDGE_PERCENTILE` | `0.8` | Percentile for the adaptive delay |
-| `HEDGE_MIN_DELAY_MS` / `HEDGE_MAX_DELAY_MS` | `50` / `1000` | Clamp for the delay |
-| `HEDGE_MAX_ATTEMPTS` | `3` | Max attempts per request (primary + hedges + failovers) |
-| `UPSTREAM_CONNECT_TIMEOUT_S` / `UPSTREAM_ATTEMPT_TIMEOUT_S` | `2` / `10` | Per-attempt timeouts |
-| `HEDGE_SIGNATURE_GUARD` | `1` | Reject responses whose signature differs from the one first seen for that prompt |
+All configuration is read from `app/config.py`:
 
-Less common knobs (`HEDGE_MIN_SAMPLES`, `HEDGE_WINDOW`, `HEDGE_EWMA_ALPHA`, `HEDGE_IDLE_DECAY_HALF_LIFE_S`,
-`HEDGE_SIGNATURE_MEMO_SIZE`) are in `app/config.py`.
-
+| Environment variable | Default | Meaning |
+|---|---:|---|
+| `LLM_SERVICE_URLS` | `http://localhost:9001,http://localhost:9002,http://localhost:9003` | Comma-separated upstream replica URLs |
+| `ROUTER_STRATEGY` | `latency` | `latency` (EWMA × in-flight, power-of-two choices) or `round_robin` |
+| `ROUTER_EWMA_ALPHA` | `0.2` | Weight of the newest latency sample |
+| `ROUTER_EWMA_HALF_LIFE_S` | `2.0` | Time for stale EWMA history to lose half its weight |
+| `ROUTER_EXPLORE_RATE` | `0.02` | Fraction of requests sent to a random replica |
+| `ROUTER_PROBE_INTERVAL_S` | `5.0` | Idle interval after which a replica is probed again |
+| `ROUTER_CONNECT_TIMEOUT_S` | `1.0` | Upstream connection timeout |
+| `ROUTER_ATTEMPT_TIMEOUT_S` | `8.0` | Hard cap for one upstream attempt |
+| `ROUTER_MAX_ATTEMPTS` | `2` | Maximum sequential attempts when hedging is disabled |
+| `HEDGE_ENABLED` | `1` | Enable hedged dispatch |
+| `HEDGE_DELAY_MS` | `400` | Initial hedge delay in milliseconds |
+| `HEDGE_ADAPTIVE` | `1` | Derive hedge delay from recent successful latency samples |
+| `HEDGE_PERCENTILE` | `0.5` | Percentile used for the adaptive hedge delay |
+| `HEDGE_MIN_DELAY_MS` | `50` | Minimum adaptive hedge delay |
+| `HEDGE_MAX_DELAY_MS` | `1000` | Maximum adaptive hedge delay |
+| `HEDGE_MIN_SAMPLES` | `20` | Samples required before adaptive delay is used |
+| `HEDGE_WINDOW` | `512` | Number of successful latency samples retained |
+| `HEDGE_MAX_ATTEMPTS` | `3` | Maximum total attempts in hedged mode |
+| `HEDGE_SIGNATURE_GUARD` | `1` | Reject a repeated prompt's response when its signature diverges |
+| `HEDGE_SIGNATURE_MEMO_SIZE` | `10000` | Maximum repeated-prompt signatures retained |
+| `RESPONSE_CACHE_ENABLED` | `1` | Enable response caching |
+| `RESPONSE_CACHE_TTL_S` | `300` | Cache entry lifetime in seconds |
+| `RESPONSE_CACHE_MAX_ENTRIES` | `1024` | Maximum number of cached responses |
+| `RESPONSE_CACHE_COALESCE` | `1` | Coalesce concurrent cache misses for the same request |
 ## Layout
 
 - `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware
