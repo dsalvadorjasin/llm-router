@@ -56,6 +56,12 @@ cancelled. Failures fail over immediately; 4xx responses are returned without a
 retry. Repeated prompts with divergent backend signatures remain pinned to the
 first replica that served them.
 
+`POST /v1/generate` caches only 2xx JSON objects with a non-empty
+`completion` and a 64-character hexadecimal `signature`; the full request
+payload forms the cache key. Concurrent misses for the same payload share one
+upstream call. Failed or non-cacheable responses are never cached, and
+`POST /v1/chat` is not cached.
+
 All configuration is read from `app/config.py`:
 
 | Environment variable | Default | Meaning |
