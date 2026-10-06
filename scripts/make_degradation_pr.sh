@@ -2,7 +2,7 @@
 # Perf-gate automation test: opens a PR that intentionally regresses request
 # latency, to verify the gate catches the regression and attributes the cause.
 set -euo pipefail
-REPO_OWNER="${REPO_OWNER:-abboudp}"
+REPO_OWNER="${REPO_OWNER:-dsalvadorjasin}"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
