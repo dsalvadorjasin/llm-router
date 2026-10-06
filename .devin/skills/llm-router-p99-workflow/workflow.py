@@ -264,8 +264,9 @@ async def main():
     baseline, strat_results = results[0], list(results[1:])
 
     runs_p99 = [run["p99"] for run in baseline["runs"]]
-    if len(runs_p99) == 3:
-        baseline["p99_median"] = statistics.median(runs_p99)
+    if len(runs_p99) != 3:
+        raise RuntimeError(f"baseline: expected 3 bench runs, got {len(runs_p99)}")
+    baseline["p99_median"] = statistics.median(runs_p99)
     log(f"baseline: p99_median={baseline['p99_median']:.0f}ms runs={runs_p99} err={baseline['error_rate']}")
 
     qualifying, rejected = [], []
@@ -289,6 +290,9 @@ async def main():
                            schema=COMBINE_SCHEMA, label="combine", repos=REPOS)
     if not combined["tests_pass"]:
         raise RuntimeError(f"combine: unit tests failing on {combined['branch']}")
+    missing = sorted({r["strategy"] for r in qualifying} - set(combined["merged"]))
+    if missing:
+        raise RuntimeError(f"combine: qualifying strategies not merged: {missing}")
     log(f"combined {combined['merged']} at {combined['head_sha']}")
 
     final = await agent(final_prompt(combined), phase="final-gate", schema=FINAL_SCHEMA,
@@ -299,6 +303,8 @@ async def main():
     final_exit = [run.get("k6_exit_code", 1) for run in final["runs"]]
     final_median = statistics.median(final_p99s) if final_p99s else float("inf")
     failures = []
+    if final["head_sha"] != combined["head_sha"]:
+        failures.append(f"final gate checked {final['head_sha']}, expected {combined['head_sha']}")
     if len(final["runs"]) != 3:
         failures.append(f"expected 3 bench runs, got {len(final['runs'])}")
     if any(e > 0 for e in final_errs):

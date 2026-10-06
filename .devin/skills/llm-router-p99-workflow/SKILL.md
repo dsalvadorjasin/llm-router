@@ -5,7 +5,7 @@ description: Dynamic workflow that cuts /v1/generate p99 below 500ms with 0% err
 
 # llm-router p99 latency workflow
 
-Run it with `run_workflow`, `workflow_name="llm-router-p99-v1"` and `script_path` set to the absolute path of `workflow.py` in this folder. Run your plan past the user first. It starts 6 child sessions on separate machines, each billed in ACUs (about 12 ACUs and 25 minutes the first time).
+Run it with `run_workflow`, `workflow_name="llm-router-p99-v1"` and `script_path` set to the absolute path of `workflow.py` in this folder. Run your plan past the user first. It starts 7 child sessions (baseline, 3 strategies, combine, final gate, PR) on separate machines, each billed in ACUs (about 12 ACUs and 25 minutes the first time).
 
 ## What it does
 1. **baseline** and the 3 **strategies** start at the same time:
