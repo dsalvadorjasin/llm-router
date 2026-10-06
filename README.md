@@ -29,6 +29,33 @@ make bench   # run the k6 load harness
 make e2e     # run the Playwright end-to-end UI tests
 ```
 
+## Routing
+
+`/v1/generate` and `/v1/chat` requests are spread across `LLM_SERVICE_URLS`
+(default: the three local replicas) by `app/balancer.py`. The default
+`latency` strategy keeps an EWMA of each replica's measured response time and
+sends each request to the replica with the lowest
+`ewma * (1 + outstanding_weight * in_flight)`. It never permanently excludes a
+replica:
+
+- **Cold start** — replicas with no measurement yet are tried first.
+- **Exploration / recovery** — a replica not sent any traffic for
+  `ROUTER_PROBE_INTERVAL_S` gets the next request, so slow or failing replicas
+  are re-measured and win traffic back once they recover.
+- **Errors** — a 5xx or transport error is recorded as at least
+  `ROUTER_ERROR_PENALTY_S` of latency; the response/error is still passed
+  through unchanged (no retries or hedging).
+
+| Variable                    | Default   | Meaning |
+|-----------------------------|-----------|---------|
+| `ROUTER_STRATEGY`           | `latency` | `latency`, or `round_robin` for the original strict rotation |
+| `ROUTER_EWMA_ALPHA`         | `0.3`     | Weight of the newest latency sample (0 < alpha <= 1) |
+| `ROUTER_PROBE_INTERVAL_S`   | `5.0`     | Max seconds a replica can go without traffic before it is probed |
+| `ROUTER_ERROR_PENALTY_S`    | `5.0`     | Minimum latency sample recorded for a failed request |
+| `ROUTER_OUTSTANDING_WEIGHT` | `1.0`     | How strongly in-flight requests raise a replica's cost (0 = latency only) |
+
+Restart the router after changing these.
+
 ## API
 
 | Method | Path                                       | Description                              |
@@ -45,7 +72,7 @@ make e2e     # run the Playwright end-to-end UI tests
 
 ## Layout
 
-- `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware
+- `app/` — FastAPI gateway: generate/chat/info routes, latency-aware upstream balancer, conversation store, markdown export, request logging middleware
 - `bench/` — k6 load test script and weighted workload
 - `docker-compose.yml` — backend fleet service definitions
 - `frontend/` — React + TypeScript playground UI (Vite, Vitest, Testing Library, Playwright)
