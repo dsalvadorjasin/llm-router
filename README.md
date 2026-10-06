@@ -43,6 +43,24 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
+## Upstream routing
+
+`app/upstream.py` picks a backend replica per request. Configured via env (read in `app/config.py`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLM_SERVICE_URLS` | `localhost:9001-9003` | Comma-separated replica URLs |
+| `ROUTER_STRATEGY` | `latency` | `latency` (EWMA latency x in-flight, power-of-two-choices) or `round_robin` |
+| `ROUTER_EWMA_ALPHA` | `0.2` | Weight of the newest latency sample |
+| `ROUTER_EWMA_HALF_LIFE_S` | `2.0` | Stale EWMA history halves in weight after this long without a sample |
+| `ROUTER_EXPLORE_RATE` | `0.02` | Fraction of requests sent to a random replica |
+| `ROUTER_PROBE_INTERVAL_S` | `5.0` | A replica not picked for this long gets the next request (re-discovers recovered replicas) |
+| `ROUTER_CONNECT_TIMEOUT_S` | `1.0` | Upstream connect timeout |
+| `ROUTER_ATTEMPT_TIMEOUT_S` | `8.0` | Hard cap per upstream attempt |
+| `ROUTER_MAX_ATTEMPTS` | `2` | Attempts per request; a failed/timed-out/5xx attempt is retried on a different replica |
+
+Replicas without a sample are probed one request at a time at cold start; errors count as a timeout-sized latency sample, and the first success afterwards resets the replica's EWMA.
+
 ## Layout
 
 - `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware
