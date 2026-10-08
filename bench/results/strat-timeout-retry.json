@@ -1,0 +1,145 @@
+{
+    "metrics": {
+        "checks": {
+            "passes": 7178,
+            "fails": 26,
+            "thresholds": {
+                "rate>0.99": false
+            },
+            "value": 0.9963908939478068
+        },
+        "iterations": {
+            "count": 1801,
+            "rate": 29.91756127202285
+        },
+        "http_req_receiving": {
+            "max": 3.244746,
+            "avg": 0.061580544697390396,
+            "p(50)": 0.04077,
+            "p(95)": 0.106152,
+            "p(99)": 0.354752
+        },
+        "vus_max": {
+            "min": 250,
+            "max": 250,
+            "value": 250
+        },
+        "http_req_failed": {
+            "passes": 8,
+            "fails": 1793,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0.004441976679622432
+        },
+        "http_reqs": {
+            "count": 1801,
+            "rate": 29.91756127202285
+        },
+        "iteration_duration": {
+            "p(50)": 155.386609,
+            "p(95)": 331.828204,
+            "p(99)": 473.838452,
+            "max": 602.725501,
+            "avg": 187.53148435036093
+        },
+        "http_req_connecting": {
+            "avg": 0.11815205774569688,
+            "p(50)": 0.088612,
+            "p(95)": 0.250565,
+            "p(99)": 0.375797,
+            "max": 6.914219
+        },
+        "vus": {
+            "value": 6,
+            "min": 4,
+            "max": 8
+        },
+        "http_req_duration": {
+            "avg": 187.12775480177717,
+            "p(50)": 154.928972,
+            "p(95)": 331.453155,
+            "p(99)": 473.590718,
+            "max": 602.339084
+        },
+        "http_req_duration{expected_response:true}": {
+            "avg": 185.27761292414982,
+            "p(50)": 154.684954,
+            "p(95)": 328.945377,
+            "p(99)": 452.36482003999987,
+            "max": 509.095599
+        },
+        "http_req_sending": {
+            "avg": 0.047546339255968934,
+            "p(50)": 0.04326,
+            "p(95)": 0.05865,
+            "p(99)": 0.091303,
+            "max": 3.069498
+        },
+        "http_req_blocked": {
+            "p(50)": 0.132051,
+            "p(95)": 0.295658,
+            "p(99)": 0.445293,
+            "max": 6.953349,
+            "avg": 0.163020176013326
+        },
+        "http_req_waiting": {
+            "p(50)": 154.841183,
+            "p(95)": 331.359346,
+            "p(99)": 473.491506,
+            "max": 602.263405,
+            "avg": 187.01862791782335
+        },
+        "http_req_tls_handshaking": {
+            "avg": 0,
+            "p(50)": 0,
+            "p(95)": 0,
+            "p(99)": 0,
+            "max": 0
+        },
+        "data_sent": {
+            "count": 502118,
+            "rate": 8341.002793329024
+        },
+        "data_received": {
+            "count": 1403440,
+            "rate": 23313.438196339674
+        }
+    },
+    "root_group": {
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "status 200": {
+                    "name": "status 200",
+                    "path": "::status 200",
+                    "id": "fad9fa412b86fcb03bee97c80dcd61f1",
+                    "passes": 1793,
+                    "fails": 8
+                },
+                "completion non-empty": {
+                    "path": "::completion non-empty",
+                    "id": "a2b55f27b38a92e79d0b3c412f3d4c72",
+                    "passes": 1793,
+                    "fails": 8,
+                    "name": "completion non-empty"
+                },
+                "signature well-formed": {
+                    "id": "64d34df8fda55d1358da664a45bc7ba1",
+                    "passes": 1793,
+                    "fails": 8,
+                    "name": "signature well-formed",
+                    "path": "::signature well-formed"
+                },
+                "signature stable for prompt": {
+                    "passes": 1799,
+                    "fails": 2,
+                    "name": "signature stable for prompt",
+                    "path": "::signature stable for prompt",
+                    "id": "82f588dacb4eb707fc65edfdbccad2a5"
+                }
+            },
+        "name": ""
+    }
+}
