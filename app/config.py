@@ -76,3 +76,11 @@ def history_limit() -> int | None:
         return None
     limit = int(raw)
     return limit if limit > 0 else None
+
+
+def hedging_enabled() -> bool:
+    return os.environ.get("LLM_HEDGING", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def hedge_delay_ms() -> float:
+    return float(os.environ.get("LLM_HEDGE_DELAY_MS", "225"))
