@@ -1,0 +1,24 @@
+Control (unmodified main a2ceb2a973): median p99 4172ms over 3 runs. Verbatim k6 summaries:
+Run 1:
+=== bench summary (60s @ 30 rps) ===
+  p50          156 ms
+  p95          2952 ms
+  p99          4055 ms
+  error rate   0.00 %
+  checks       100.00 %
+
+Run 2:
+=== bench summary (60s @ 30 rps) ===
+  p50          154 ms
+  p95          3112 ms
+  p99          4172 ms
+  error rate   0.00 %
+  checks       100.00 %
+
+Run 3:
+=== bench summary (60s @ 30 rps) ===
+  p50          157 ms
+  p95          3071 ms
+  p99          4241 ms
+  error rate   0.00 %
+  checks       100.00 %
