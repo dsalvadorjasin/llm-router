@@ -29,6 +29,24 @@ def _recording_transport(hits: list[str]) -> httpx.MockTransport:
 
 
 def test_round_robin_and_passthrough():
+    """Equal (frozen-clock) latencies tie, so selection falls back to round-robin."""
+    hits: list[str] = []
+    urls = ["http://u1:9000", "http://u2:9000", "http://u3:9000"]
+    pool = UpstreamPool(urls=urls, transport=_recording_transport(hits),
+                        clock=lambda: 0.0, rng=lambda: 1.0)
+
+    async def run():
+        results = [await pool.forward({"prompt": "p"}) for _ in range(4)]
+        await pool.aclose()
+        return results
+
+    results = asyncio.run(run())
+    assert hits == ["http://u1:9000", "http://u2:9000", "http://u3:9000", "http://u1:9000"]
+    assert all(r == (200, {"completion": "ok"}) for r in results)
+
+
+def test_kill_switch_restores_plain_round_robin(monkeypatch):
+    monkeypatch.setenv("LLM_ROUTING", "roundrobin")
     hits: list[str] = []
     urls = ["http://u1:9000", "http://u2:9000", "http://u3:9000"]
     pool = UpstreamPool(urls=urls, transport=_recording_transport(hits))

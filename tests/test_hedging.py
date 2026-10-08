@@ -60,8 +60,8 @@ def test_config_defaults(monkeypatch):
     for key in ("LLM_HEDGING", "LLM_HEDGE_DELAY_MS", "LLM_ATTEMPT_TIMEOUT_MS", "LLM_MAX_ATTEMPTS"):
         monkeypatch.delenv(key, raising=False)
     assert config.hedging_enabled() is True
-    assert config.hedge_delay_ms() == 225
-    assert config.attempt_timeout_ms() == 5000
+    assert config.hedge_delay_ms() == 150
+    assert config.attempt_timeout_ms() == 200
     assert config.max_attempts() == 3
     monkeypatch.setenv("LLM_HEDGING", "0")
     assert config.hedging_enabled() is False
@@ -196,7 +196,7 @@ def test_no_hedge_when_first_attempt_is_fast(monkeypatch):
 
 
 def test_kill_switch_disables_hedging(monkeypatch):
-    _env(monkeypatch, LLM_HEDGING=0, LLM_HEDGE_DELAY_MS=10)
+    _env(monkeypatch, LLM_HEDGING=0, LLM_HEDGE_DELAY_MS=10, LLM_ATTEMPT_TIMEOUT_MS=5000)
     hits: list[str] = []
     behaviour = {
         URLS[0]: (0.2, 200, {"completion": "slow but only"}),

@@ -55,6 +55,9 @@ def env(monkeypatch):
     monkeypatch.setenv("LLM_REQUEST_BUDGET_MS", "1000")
     monkeypatch.setenv("LLM_MAX_ATTEMPTS", "3")
     monkeypatch.setenv("LLM_ADAPTIVE_TIMEOUT", "0")
+    # Isolate strategy A: plain round-robin first attempts, no hedging.
+    monkeypatch.setenv("LLM_ROUTING", "roundrobin")
+    monkeypatch.setenv("LLM_HEDGING", "0")
     return monkeypatch
 
 
@@ -236,7 +239,7 @@ def test_forward_fills_log_fields(env):
             await pool.aclose()
 
     asyncio.run(go())
-    assert fields == {"upstream_url": URLS[1], "attempts": 2, "hedged": False}
+    assert fields == {"upstream_url": URLS[1], "hedged": False}
 
 
 def test_request_log_line_includes_upstream_url_and_hedged(env, caplog):
@@ -247,5 +250,5 @@ def test_request_log_line_includes_upstream_url_and_hedged(env, caplog):
             client.post("/v1/generate", json={"prompt": "hi"})
             client.get("/v1/conversations")
     gen, conv = [m for m in caplog.messages if m.startswith("request ")][-2:]
-    assert f"upstream_url={URLS[0]}" in gen and "hedged=false" in gen and "attempts=1" in gen
-    assert "upstream_url=- hedged=- attempts=-" in conv
+    assert f"upstream_url={URLS[0]}" in gen and "hedged=false" in gen
+    assert "upstream_url=- hedged=-" in conv

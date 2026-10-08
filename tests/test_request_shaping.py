@@ -158,6 +158,6 @@ def test_log_line_has_upstream_url_and_hedged(caplog):
             r3 = client.get("/v1/conversations")
     assert (r1.status_code, r2.status_code, r3.status_code) == (200, 200, 200)
     gen, chat, listing = [m for m in caplog.messages if m.startswith("request ")][-3:]
-    assert "path=/v1/generate" in gen and "upstream_url=http://u1:9000 hedged=False" in gen
-    assert "path=/v1/chat" in chat and "upstream_url=http://u1:9000 hedged=False" in chat
+    assert "path=/v1/generate" in gen and "upstream_url=http://u1:9000 hedged=false" in gen
+    assert "path=/v1/chat" in chat and "upstream_url=http://u1:9000 hedged=false" in chat
     assert "path=/v1/conversations" in listing and "upstream_url=- hedged=-" in listing
