@@ -1,7 +1,9 @@
+import asyncio
 import time
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..config import history_limit
 from ..prompting import flatten_history
 from ..schemas import ChatRequest, ChatTurnResponse
 
@@ -13,11 +15,13 @@ _AUTO_TITLE_LIMIT = 48
 @router.post("/v1/chat", response_model=ChatTurnResponse)
 async def chat(body: ChatRequest, request: Request):
     store = request.app.state.store
-    conversation = store.get_conversation(body.conversation_id)
+    conversation = await asyncio.to_thread(store.get_conversation, body.conversation_id)
     if conversation is None:
         raise HTTPException(status_code=404, detail="conversation not found")
 
-    history = store.list_messages(body.conversation_id)
+    history = await asyncio.to_thread(
+        store.list_messages, body.conversation_id, limit=history_limit()
+    )
     prompt = flatten_history(history, body.message)
 
     start = time.monotonic()
@@ -31,11 +35,15 @@ async def chat(body: ChatRequest, request: Request):
                             detail=upstream.get("detail", "upstream error"))
 
     if not history and conversation["title"] == "New conversation":
-        store.update_conversation(body.conversation_id, title=body.message[:_AUTO_TITLE_LIMIT])
+        await asyncio.to_thread(
+            store.update_conversation, body.conversation_id,
+            title=body.message[:_AUTO_TITLE_LIMIT],
+        )
 
-    store.add_message(body.conversation_id, "user", body.message)
-    assistant = store.add_message(
-        body.conversation_id, "assistant", upstream["completion"], latency_ms=latency_ms
+    await asyncio.to_thread(store.add_message, body.conversation_id, "user", body.message)
+    assistant = await asyncio.to_thread(
+        store.add_message, body.conversation_id, "assistant", upstream["completion"],
+        latency_ms=latency_ms,
     )
     return {
         "message": assistant,
