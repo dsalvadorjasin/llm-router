@@ -161,3 +161,19 @@ def test_log_line_has_upstream_url_and_hedged(caplog):
     assert "path=/v1/generate" in gen and "upstream_url=http://u1:9000 hedged=false" in gen
     assert "path=/v1/chat" in chat and "upstream_url=http://u1:9000 hedged=false" in chat
     assert "path=/v1/conversations" in listing and "upstream_url=- hedged=-" in listing
+
+
+def test_concurrent_turns_are_stored_as_adjacent_pairs(tmp_path):
+    store = Store(str(tmp_path / "turns.db"))
+    conv = store.create_conversation()
+    threads = [threading.Thread(target=store.add_turn, args=(conv["id"], f"u{i}", f"a{i}"))
+               for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    msgs = store.list_messages(conv["id"])
+    assert len(msgs) == 40
+    for user, assistant in zip(msgs[::2], msgs[1::2]):
+        assert (user["role"], assistant["role"]) == ("user", "assistant")
+        assert user["content"][1:] == assistant["content"][1:]

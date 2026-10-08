@@ -6,7 +6,7 @@ import httpx
 
 from app.request_context import request_log_fields
 from app.routing import LatencyRouter
-from app.upstream import UpstreamPool
+from app.upstream import UpstreamPool, _Outcome, _success_first
 
 U1, U2, U3 = "http://u1:9000", "http://u2:9000", "http://u3:9000"
 
@@ -26,7 +26,7 @@ def _transport(delays: dict, hits: list[str], first_only: bool = False) -> httpx
         seen.add(host)
         if first or not first_only:
             await asyncio.sleep(delays.get(host, 0.0))
-        return httpx.Response(200, json={"from": host})
+        return httpx.Response(200, json={"completion": "ok", "from": host})
 
     return httpx.MockTransport(handler)
 
@@ -69,7 +69,7 @@ def test_cancelled_hedge_loser_does_not_seed_cold_ewma(monkeypatch):
     router = LatencyRouter([U1, U2], probe_ratio=0.0)
     pool = UpstreamPool([U1, U2], _transport({U1: 0.3}, hits), router=router)
     (status, body), _, fields = _run(pool)
-    assert (status, body, fields["hedged"]) == (200, {"from": U2}, True)
+    assert (status, body, fields["hedged"]) == (200, {"completion": "ok", "from": U2}, True)
     snap = router.snapshot()
     assert snap[U1]["ewma_ms"] is None and snap[U1]["floor_ms"] > 0
     assert snap[U1]["penalty_ms"] == 0 and snap[U1]["inflight"] == 0
@@ -84,7 +84,7 @@ def test_ranking_orders_primary_and_hedge_targets(monkeypatch):
     pool = UpstreamPool([U1, U2, U3], _transport({U3: 0.3}, hits), router=router)
     (status, body), _, fields = _run(pool)
     assert hits == [U3, U1]
-    assert (status, body, fields) == (200, {"from": U1}, {"upstream_url": U1, "hedged": True})
+    assert (status, body, fields) == (200, {"completion": "ok", "from": U1}, {"upstream_url": U1, "hedged": True})
 
 
 def test_later_hedge_reuses_best_upstream_instead_of_slowest(monkeypatch):
@@ -95,7 +95,7 @@ def test_later_hedge_reuses_best_upstream_instead_of_slowest(monkeypatch):
     pool = UpstreamPool([U1, U2, U3], transport, router=router)
     (status, body), elapsed, _ = _run(pool)
     assert hits == [U1, U2, U1]
-    assert (status, body) == (200, {"from": U1})
+    assert (status, body) == (200, {"completion": "ok", "from": U1})
     assert elapsed < 0.3
 
 
@@ -121,7 +121,7 @@ def test_failover_is_clamped_to_remaining_budget(monkeypatch):
         if _host(request) == U1:
             return httpx.Response(503, json={"detail": "busy"})
         await asyncio.sleep(1.0)
-        return httpx.Response(200, json={"from": "late"})
+        return httpx.Response(200, json={"completion": "late", "from": "late"})
 
     router = LatencyRouter([U1, U2], probe_ratio=0.0)
     pool = UpstreamPool([U1, U2], httpx.MockTransport(handler), router=router)
@@ -139,7 +139,23 @@ def test_probe_updates_stats_but_its_body_is_never_returned(monkeypatch):
     router._stats[U3].last_success = -1.0  # least recently successful
     pool = UpstreamPool([U1, U2, U3], _transport({U3: 0.05}, hits), router=router)
     (status, body), _, fields = _run(pool, settle_s=0.15)
-    assert (status, body) == (200, {"from": U1})
+    assert (status, body) == (200, {"completion": "ok", "from": U1})
     assert fields == {"upstream_url": U1, "hedged": False}
     assert sorted(hits) == [U1, U3]
     assert router.snapshot()[U3]["ewma_ms"] < 1200  # probe sample folded in
+
+
+def test_success_wins_over_client_error_completing_in_same_wait():
+    async def go():
+        loop = asyncio.get_running_loop()
+
+        def done(outcome):
+            fut = loop.create_future()
+            fut.set_result(outcome)
+            return fut
+
+        error = done(_Outcome(U1, "final", 400, {"detail": "bad"}))
+        success = done(_Outcome(U2, "final", 200, {"completion": "ok"}))
+        return sorted([error, success], key=_success_first)[0] is success
+
+    assert asyncio.run(go())

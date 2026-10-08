@@ -34,16 +34,13 @@ async def chat(body: ChatRequest, request: Request):
         raise HTTPException(status_code=status,
                             detail=upstream.get("detail", "upstream error"))
 
+    title = None
     if not history and conversation["title"] == "New conversation":
-        await asyncio.to_thread(
-            store.update_conversation, body.conversation_id,
-            title=body.message[:_AUTO_TITLE_LIMIT],
-        )
+        title = body.message[:_AUTO_TITLE_LIMIT]
 
-    await asyncio.to_thread(store.add_message, body.conversation_id, "user", body.message)
     assistant = await asyncio.to_thread(
-        store.add_message, body.conversation_id, "assistant", upstream["completion"],
-        latency_ms=latency_ms,
+        store.add_turn, body.conversation_id, body.message, upstream["completion"],
+        latency_ms=latency_ms, title=title,
     )
     return {
         "message": assistant,

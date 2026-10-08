@@ -190,6 +190,16 @@ class Store:
         return message
 
     @_locked
+    def add_turn(self, conversation_id: str, user_content: str, assistant_content: str,
+                 latency_ms: int | None = None, title: str | None = None) -> dict:
+        """Store a user/assistant pair atomically so concurrent turns never interleave."""
+        if title is not None:
+            self.update_conversation(conversation_id, title=title)
+        self.add_message(conversation_id, "user", user_content)
+        return self.add_message(conversation_id, "assistant", assistant_content,
+                                latency_ms=latency_ms)
+
+    @_locked
     def list_messages(self, conversation_id: str, limit: int | None = None,
                       before: str | None = None) -> list[dict]:
         """List a conversation's messages in chronological order.

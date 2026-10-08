@@ -61,7 +61,8 @@ class _Health:
 
     def failure_ratio(self, now: float) -> float:
         self._decay(now)
-        return self._fail / self._total if self._total > 1e-9 else 0.0
+        # Floor the denominator at one sample so an idle upstream's ratio decays to zero.
+        return self._fail / max(self._total, 1.0)
 
 
 @dataclass
@@ -80,6 +81,15 @@ def _body(resp: httpx.Response) -> dict | None:
             return None
         return {"detail": resp.text[:200] or "upstream error"}
     return body if isinstance(body, dict) else {"detail": body}
+
+
+def _malformed(status: int, body: dict | None) -> bool:
+    return body is None or (status < 300 and "completion" not in body)
+
+
+def _success_first(task: asyncio.Task) -> bool:
+    outcome = task.result()
+    return not (outcome.kind == "final" and outcome.status < 300)
 
 
 class UpstreamPool:
@@ -209,10 +219,11 @@ class UpstreamPool:
             raise
         now = time.monotonic()
         body = _body(resp)
-        if body is None or resp.status_code >= 500:
+        malformed = _malformed(resp.status_code, body)
+        if malformed or resp.status_code >= 500:
             self.router.finish(url, token, ok=False)
             self._health[idx].record(False, now)
-            if body is None:
+            if malformed:
                 return _Outcome(url, "invalid")
             return _Outcome(url, "status", resp.status_code, body)
         self.router.finish(url, token, ok=True)
@@ -228,7 +239,7 @@ class UpstreamPool:
         try:
             resp = await asyncio.wait_for(
                 self._client.post(f"{url}/v1/completions", json=payload), self._probe_timeout_s)
-            ok = resp.status_code < 500 and _body(resp) is not None
+            ok = resp.status_code < 500 and not _malformed(resp.status_code, _body(resp))
         except asyncio.CancelledError:
             self.router.abandon(url, token)
             raise
@@ -295,7 +306,7 @@ class UpstreamPool:
                         hedged = True
                         next_hedge_at = loop.time() + self._hedge_delay_s
                     continue
-                for task in done:
+                for task in sorted(done, key=_success_first):
                     url = pending.pop(task)
                     outcome = task.result()
                     if outcome.kind == "final":

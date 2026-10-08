@@ -177,7 +177,7 @@ def test_suspect_upstream_gets_short_timeout_with_periodic_full_probes(env):
 
     async def u1(request):
         await asyncio.sleep(slow["delay"])
-        return httpx.Response(200, json={"from": "u1"})
+        return httpx.Response(200, json={"completion": "ok", "from": "u1"})
 
     pool = UpstreamPool(URLS[:2], _transport({URLS[0]: u1}, hits))
 
@@ -214,7 +214,7 @@ def test_adaptive_timeout_tracks_recent_latency_within_bounds(monkeypatch):
     monkeypatch.setenv("LLM_ATTEMPT_TIMEOUT_MS", "200")
     monkeypatch.setenv("LLM_MIN_ATTEMPT_TIMEOUT_MS", "120")
     monkeypatch.setenv("LLM_ADAPTIVE_TIMEOUT_MULTIPLIER", "1.1")
-    pool = UpstreamPool(URLS, httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    pool = UpstreamPool(URLS, httpx.MockTransport(lambda r: httpx.Response(200, json={"completion": "ok"})))
     assert pool.attempt_timeout() == pytest.approx(0.2)
     pool._latencies.extend([0.14] * 50)
     assert pool.attempt_timeout() == pytest.approx(0.154)
@@ -252,3 +252,19 @@ def test_request_log_line_includes_upstream_url_and_hedged(env, caplog):
     gen, conv = [m for m in caplog.messages if m.startswith("request ")][-2:]
     assert f"upstream_url={URLS[0]}" in gen and "hedged=false" in gen
     assert "upstream_url=- hedged=-" in conv
+
+
+def test_malformed_2xx_fails_over_to_a_healthy_upstream(env):
+    hits: list[str] = []
+    pool = UpstreamPool(URLS, _transport({URLS[0]: _status(200, {"text": "no completion"})}, hits))
+    [(status, body)] = _run(pool)
+    assert (status, body["from"]) == (200, URLS[1])
+    assert hits == URLS[:2]
+
+
+def test_failure_ratio_decays_while_idle():
+    health = _Health(halflife_s=1.0)
+    for _ in range(10):
+        health.record(False, now=0.0)
+    assert health.failure_ratio(now=0.0) == pytest.approx(1.0)
+    assert health.failure_ratio(now=10.0) < 0.02
