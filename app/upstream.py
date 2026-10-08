@@ -3,6 +3,7 @@ from itertools import cycle
 import httpx
 
 from .config import upstream_urls
+from .middleware.logging import upstream_info
 
 
 class UpstreamPool:
@@ -14,6 +15,10 @@ class UpstreamPool:
     async def forward(self, payload: dict) -> tuple[int, dict]:
         url = next(self._urls)
         resp = await self._client.post(f"{url}/v1/completions", json=payload)
+        info = upstream_info.get()
+        if info is not None:
+            info["upstream_url"] = url
+            info["hedged"] = False
         return resp.status_code, resp.json()
 
     async def aclose(self) -> None:
