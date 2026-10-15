@@ -41,3 +41,134 @@ def test_round_robin_and_passthrough():
     results = asyncio.run(run())
     assert hits == ["http://u1:9000", "http://u2:9000", "http://u3:9000", "http://u1:9000"]
     assert all(r == (200, {"completion": "ok"}) for r in results)
+
+
+def _scripted_transport(hits: list[str], delays: dict[str, float],
+                        statuses: dict[str, int] | None = None) -> httpx.MockTransport:
+    statuses = statuses or {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        hits.append(host)
+        await asyncio.sleep(delays.get(host, 0))
+        status = statuses.get(host, 200)
+        return httpx.Response(status, json={"completion": host} if status == 200
+                              else {"detail": f"{host} down"})
+
+    return httpx.MockTransport(handler)
+
+
+def _pool(transport, n=3):
+    return UpstreamPool(urls=[f"http://u{i}:9000" for i in range(1, n + 1)], transport=transport)
+
+
+def test_hedge_answers_before_slow_primary(monkeypatch):
+    monkeypatch.setenv("LLM_HEDGE_DELAY_MS", "50")
+    hits: list[str] = []
+    pool = _pool(_scripted_transport(hits, {"u1": 2.0}))
+
+    async def run():
+        start = asyncio.get_running_loop().time()
+        result = await pool.forward({"prompt": "p"})
+        elapsed = asyncio.get_running_loop().time() - start
+        await pool.aclose()
+        return result, elapsed
+
+    (status, body), elapsed = asyncio.run(run())
+    assert status == 200 and body == {"completion": "u2"}
+    assert hits == ["u1", "u2"]
+    assert elapsed < 0.5
+
+
+def test_server_error_fails_over_immediately():
+    hits: list[str] = []
+    pool = _pool(_scripted_transport(hits, {}, {"u1": 503}))
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    assert asyncio.run(run()) == (200, {"completion": "u2"})
+    assert hits == ["u1", "u2"]
+
+
+def test_all_failing_passes_last_error_through(monkeypatch):
+    monkeypatch.setenv("LLM_HEDGE_MAX_ATTEMPTS", "2")
+    hits: list[str] = []
+    pool = _pool(_scripted_transport(hits, {}, {"u1": 503, "u2": 503}), n=2)
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    assert asyncio.run(run()) == (503, {"detail": "u2 down"})
+
+
+def test_client_errors_are_not_retried():
+    hits: list[str] = []
+    pool = _pool(_scripted_transport(hits, {}, {"u1": 400}))
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    assert asyncio.run(run())[0] == 400
+    assert hits == ["u1"]
+
+
+def test_slow_replica_drops_out_of_rotation(monkeypatch):
+    monkeypatch.setenv("LLM_HEDGE_DELAY_MS", "30")
+    hits: list[str] = []
+    pool = _pool(_scripted_transport(hits, {"u1": 0.01, "u2": 0.01, "u3": 0.5}))
+
+    async def run():
+        for _ in range(9):
+            await pool.forward({"prompt": "p"})
+        hits.clear()
+        for _ in range(10):
+            assert (await pool.forward({"prompt": "p"}))[0] == 200
+        await pool.aclose()
+
+    asyncio.run(run())
+    assert "u3" not in hits
+    assert {"u1", "u2"} <= set(hits)
+
+
+def test_kill_switch_restores_plain_round_robin(monkeypatch):
+    monkeypatch.setenv("LLM_HEDGING", "0")
+    hits: list[str] = []
+    pool = _pool(_scripted_transport(hits, {}, {"u1": 503}))
+
+    async def run():
+        results = [await pool.forward({"prompt": "p"}) for _ in range(4)]
+        await pool.aclose()
+        return results
+
+    results = asyncio.run(run())
+    assert hits == ["u1", "u2", "u3", "u1"]
+    assert results[0] == (503, {"detail": "u1 down"})
+
+
+def test_short_cancelled_hedge_does_not_make_slow_replica_look_fast(monkeypatch):
+    monkeypatch.setenv("LLM_HEDGE_DELAY_MS", "80")
+    hits: list[str] = []
+    # u1 answers just after the hedge to slow u2 starts, so u2 is cancelled
+    # within ~10ms; that must not rank u2 as the fastest replica.
+    pool = _pool(_scripted_transport(hits, {"u1": 0.09, "u2": 1.0}), n=2)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        timings = []
+        for _ in range(6):
+            start = loop.time()
+            result = await pool.forward({"prompt": "p"})
+            timings.append((result, loop.time() - start))
+        await pool.aclose()
+        return timings
+
+    timings = asyncio.run(run())
+    assert all(result == (200, {"completion": "u1"}) for result, _ in timings)
+    assert all(elapsed < 0.4 for _, elapsed in timings)

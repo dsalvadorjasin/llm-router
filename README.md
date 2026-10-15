@@ -43,6 +43,18 @@ make e2e     # run the Playwright end-to-end UI tests
 | GET    | `/v1/conversations/{id}/messages?limit=&before=` | List messages in a conversation, with optional pagination |
 | GET    | `/v1/conversations/{id}/export`              | Download the conversation as a markdown transcript |
 
+## Upstream routing
+
+`/v1/generate` and `/v1/chat` go through `UpstreamPool` (`app/upstream.py`). Each request goes to the fastest group of replicas, ranked by median recent latency and rotated round-robin within that group. If it hasn't answered within the hedge delay (the fastest replica's median latency, capped at `LLM_HEDGE_DELAY_MS`), a backup request goes to the next best replica. The first non-5xx answer wins and the other requests are cancelled. A 5xx or connection error moves to the next replica right away. Every 50th request may send a background probe to a replica that hasn't answered in 5s, so a recovered replica can rejoin.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `LLM_SERVICE_URLS` | `localhost:9001-9003` | Comma-separated backend URLs |
+| `LLM_HEDGING` | `1` | `0` turns hedging off and goes back to plain round-robin |
+| `LLM_HEDGE_DELAY_MS` | `150` | Longest wait before sending a backup request |
+| `LLM_HEDGE_MAX_ATTEMPTS` | `3` | Most backend calls per request |
+| `LLM_REQUEST_TIMEOUT_S` | `30` | Total time limit per request (returns 504 when exceeded) |
+
 ## Layout
 
 - `app/` — FastAPI gateway: generate/chat/info routes, conversation store, markdown export, request logging middleware
