@@ -172,3 +172,57 @@ def test_short_cancelled_hedge_does_not_make_slow_replica_look_fast(monkeypatch)
     timings = asyncio.run(run())
     assert all(result == (200, {"completion": "u1"}) for result, _ in timings)
     assert all(elapsed < 0.4 for _, elapsed in timings)
+
+
+def test_stalled_fast_replica_falls_back_to_slower_healthy_one(monkeypatch):
+    monkeypatch.setenv("LLM_HEDGE_DELAY_MS", "50")
+    monkeypatch.setenv("LLM_REQUEST_TIMEOUT_S", "2")
+    delays = {"u1": 0.01, "u2": 0.3}
+    hits: list[str] = []
+    pool = _pool(_scripted_transport(hits, delays), n=2)
+
+    async def run():
+        for _ in range(6):
+            await pool.forward({"prompt": "p"})
+        delays["u1"] = 10.0  # u1 stalls; u2 is out of the fast group but healthy
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    assert asyncio.run(run()) == (200, {"completion": "u2"})
+
+
+def test_kill_switch_still_applies_request_timeout(monkeypatch):
+    monkeypatch.setenv("LLM_HEDGING", "0")
+    monkeypatch.setenv("LLM_REQUEST_TIMEOUT_S", "0.1")
+    pool = _pool(_scripted_transport([], {"u1": 5.0}))
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    assert asyncio.run(run()) == (504, {"detail": "upstream timeout"})
+
+
+def test_probes_rotate_across_stale_replicas(monkeypatch):
+    from app import upstream
+
+    monkeypatch.setattr(upstream, "_PROBE_EVERY", 1)
+    monkeypatch.setattr(upstream, "_STALE_AFTER_S", 0.0)
+    pool = _pool(_scripted_transport([], {}, {"u1": 503}), n=2)
+    probed: list[str] = []
+
+    async def fake_attempt(replica, payload, informative_after=0.0):
+        probed.append(replica.url)
+        return 503, {}
+
+    async def run():
+        monkeypatch.setattr(pool, "_attempt", fake_attempt)
+        for _ in range(4):
+            pool._maybe_probe({"prompt": "p"})
+            await asyncio.sleep(0)
+        await pool.aclose()
+
+    asyncio.run(run())
+    assert set(probed) == {"http://u1:9000", "http://u2:9000"}

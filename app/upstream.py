@@ -40,6 +40,7 @@ class _Replica:
         self.samples: deque[float] = deque(maxlen=_WINDOW)
         self.pending: set[float] = set()
         self.last_completed = 0.0
+        self.last_probed = 0.0
 
     def score(self, now: float) -> float:
         if self.samples:
@@ -87,9 +88,12 @@ class UpstreamPool:
         untried = [r for r in tier if r not in tried]
         if not tried:
             return self._next_round_robin(tier)
-        # Prefer a fresh fast replica; otherwise retry the best one rather than
-        # falling through to a known-slow replica.
-        return untried[0] if untried else candidates[0]
+        if untried:
+            return untried[0]
+        # Retry the best replica once rather than falling through to a
+        # known-slow one, but don't keep hedging onto a replica that may be
+        # stalled: after two attempts there, move down the ranking.
+        return min(candidates, key=lambda r: tried.count(r) >= 2)
 
     def _hedge_delay(self) -> float:
         now = time.monotonic()
@@ -143,7 +147,8 @@ class UpstreamPool:
                  if not r.pending and now - r.last_completed > _STALE_AFTER_S]
         if not stale:
             return
-        replica = min(stale, key=lambda r: r.last_completed)
+        replica = min(stale, key=lambda r: r.last_probed)
+        replica.last_probed = now
         task = asyncio.create_task(
             asyncio.wait_for(self._attempt(replica, payload), _PROBE_TIMEOUT_S))
         self._background.add(task)
@@ -155,13 +160,15 @@ class UpstreamPool:
             task.exception()  # probes are best-effort; don't log "never retrieved"
 
     async def forward(self, payload: dict) -> tuple[int, dict]:
-        if not hedging_enabled():
+        if hedging_enabled():
+            self._maybe_probe(payload)
+            call = self._hedged(payload)
+        else:
             replica = self._replicas[self._rr % len(self._replicas)]
             self._rr += 1
-            return await self._post(replica.url, payload)
-        self._maybe_probe(payload)
+            call = self._post(replica.url, payload)
         try:
-            return await asyncio.wait_for(self._hedged(payload), request_timeout_s())
+            return await asyncio.wait_for(call, request_timeout_s())
         except TimeoutError:
             return 504, {"detail": "upstream timeout"}
 
