@@ -180,3 +180,32 @@ def test_timeout_is_retried_on_next_url():
 
     assert asyncio.run(run()) == (200, {"completion": "ok"})
     assert hits == ["http://u1:9000", "http://u2:9000"]
+
+
+def test_all_in_cooldown_tries_least_recently_failed_first():
+    hits: list[str] = []
+    failing = set(URLS)
+    pool = UpstreamPool(urls=URLS, transport=_scripted_transport(hits, failing), cooldown_s=60)
+
+    async def run():
+        for _ in range(2):  # fails u1,u2 then u3,u1 -> all three cooling, u2 oldest
+            try:
+                await pool.forward({"prompt": "p"})
+            except httpx.HTTPError:
+                pass
+        failing.discard("http://u3:9000")  # only u3 recovers
+        hits.clear()
+        results = []
+        for _ in range(3):
+            try:
+                results.append(await pool.forward({"prompt": "p"}))
+            except httpx.HTTPError:
+                results.append(None)
+        await pool.aclose()
+        return results
+
+    results = asyncio.run(run())
+    # the recovered replica is reached within the next two requests instead of
+    # being starved until its cooldown expires
+    assert results[1] is not None and results[2] is not None
+    assert results[1][1]["from"] == "http://u3:9000"

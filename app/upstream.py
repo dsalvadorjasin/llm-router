@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 
@@ -30,7 +31,9 @@ class UpstreamPool:
         """Round-robin over healthy URLs; URLs in cooldown are only a last resort."""
         now = time.monotonic()
         healthy = [u for u in self._urls if not self._in_cooldown(u, now)]
-        cooling = [u for u in self._urls if self._in_cooldown(u, now)]
+        # Oldest failure first: the likeliest to have recovered.
+        cooling = sorted((u for u in self._urls if self._in_cooldown(u, now)),
+                         key=self._failed_at.__getitem__)
         if healthy:
             start = self._next % len(healthy)
             healthy = healthy[start:] + healthy[:start]
