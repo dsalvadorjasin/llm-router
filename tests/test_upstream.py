@@ -337,3 +337,20 @@ def test_hedge_error_status_does_not_beat_pending_success():
 
     status, body = asyncio.run(run())
     assert status == 200 and body["from"] == "http://u1:9000"
+
+
+def test_hung_fast_replicas_fail_over_to_slow_healthy_one():
+    hits: list[str] = []
+    delays = {"http://u1:9000": 5.0, "http://u2:9000": 5.0}
+    pool = UpstreamPool(urls=URLS, transport=_latency_transport(hits, delays), timeout_s=0.3)
+    pool._latencies["http://u1:9000"].extend([0.01] * 5)
+    pool._latencies["http://u2:9000"].extend([0.01] * 5)
+    pool._latencies["http://u3:9000"].extend([0.5] * 5)
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    status, body = asyncio.run(run())
+    assert status == 200 and body["from"] == "http://u3:9000"

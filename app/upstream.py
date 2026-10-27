@@ -121,10 +121,13 @@ class UpstreamPool:
         fallback: tuple[int, dict] | None = None
 
         tried = 0
+        failures = 0
         remaining = iter(plan)
 
         def next_url() -> str | None:
-            if tried >= max_attempts:
+            # Failed attempts don't count, so failover still reaches the
+            # remaining replicas after the hedges time out.
+            if tried - failures >= max_attempts:
                 return None
             return next((u for u in remaining if u not in failed), None)
 
@@ -165,12 +168,13 @@ class UpstreamPool:
                         raise exc
                     self._failed_at[url] = time.monotonic()
                     failed.add(url)
+                    failures += 1
                     logger.warning(
                         "upstream url=%s error=%s duration_ms=%.1f cooldown_s=%s",
                         url, type(exc).__name__, elapsed * 1000, self._cooldown_s,
                     )
                     last_error = exc
-                    if upcoming in failed:
+                    if upcoming is None or upcoming in failed:
                         upcoming = next_url()
                     if upcoming and not pending:
                         launch_next(upcoming)
