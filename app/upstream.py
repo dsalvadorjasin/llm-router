@@ -165,6 +165,8 @@ class UpstreamPool:
                             continue
                         return status, body
                     if not isinstance(exc, httpx.TransportError):
+                        if fallback is not None:
+                            return fallback
                         raise exc
                     self._failed_at[url] = time.monotonic()
                     failed.add(url)

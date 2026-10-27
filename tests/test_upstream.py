@@ -354,3 +354,22 @@ def test_hung_fast_replicas_fail_over_to_slow_healthy_one():
 
     status, body = asyncio.run(run())
     assert status == 200 and body["from"] == "http://u3:9000"
+
+
+def test_malformed_hedge_response_keeps_earlier_upstream_error():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = f"{request.url.scheme}://{request.url.host}:{request.url.port}"
+        if url == "http://u1:9000":
+            await asyncio.sleep(0.4)
+            return httpx.Response(200, content=b"not json")
+        return httpx.Response(503, json={"error": "overloaded", "from": url})
+
+    pool = UpstreamPool(urls=URLS, transport=httpx.MockTransport(handler))
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    status, body = asyncio.run(run())
+    assert status == 503 and body["from"] == "http://u2:9000"
