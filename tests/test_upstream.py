@@ -302,3 +302,19 @@ def test_consistently_slow_replica_leaves_the_rotation():
     # after its first (hedged) attempt, u3 is no longer chosen first
     firsts_on_u3 = hits.count("http://u3:9000")
     assert firsts_on_u3 == 1
+
+
+def test_hedging_disabled_keeps_plain_round_robin():
+    hits: list[str] = []
+    pool = UpstreamPool(urls=URLS, transport=_latency_transport(hits, {}), hedging=False)
+    pool._latencies["http://u1:9000"].extend([0.01] * 5)
+    pool._latencies["http://u2:9000"].extend([0.01] * 5)
+    pool._latencies["http://u3:9000"].extend([0.5] * 5)
+
+    async def run():
+        for _ in range(3):
+            await pool.forward({"prompt": "p"})
+        await pool.aclose()
+
+    asyncio.run(run())
+    assert hits == URLS

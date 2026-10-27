@@ -77,6 +77,10 @@ class UpstreamPool:
         healthy = [u for u in self._urls if not self._in_cooldown(u, now)]
         cooling = sorted((u for u in self._urls if self._in_cooldown(u, now)),
                          key=self._failed_at.__getitem__)
+        if not self._hedging:
+            start = self._next % len(healthy) if healthy else 0
+            self._next += 1
+            return healthy[start:] + healthy[:start] + cooling
         known = [s for s in map(self._score, healthy) if s is not None]
         cutoff = 1.5 * min(known) + 0.02 if known else float("inf")
         fast = [u for u in healthy if (self._score(u) or 0.0) <= cutoff]
@@ -85,8 +89,6 @@ class UpstreamPool:
             start = self._next % len(fast)
             fast = fast[start:] + fast[:start]
         self._next += 1
-        if not self._hedging:
-            return fast + slow + cooling
         lead: list[str] = []
         if slow and self._next % _PROBE_EVERY == 0:
             # Occasionally lead with a slow replica so its stats stay fresh
