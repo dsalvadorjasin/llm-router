@@ -117,7 +117,7 @@ class UpstreamPool:
         delay = self._hedge_delay()
         failed: set[str] = set()
         pending: dict[asyncio.Task, tuple[str, float]] = {}
-        last_error: httpx.HTTPError | None = None
+        last_error: Exception | None = None
         fallback: tuple[int, dict] | None = None
 
         tried = 0
@@ -165,6 +165,11 @@ class UpstreamPool:
                             continue
                         return status, body
                     if not isinstance(exc, httpx.TransportError):
+                        # e.g. a malformed body: not the replica's health, but
+                        # another attempt may still answer properly.
+                        last_error = exc
+                        if pending:
+                            continue
                         if fallback is not None:
                             return fallback
                         raise exc
