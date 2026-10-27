@@ -14,3 +14,12 @@ def upstream_timeout_s() -> float:
 
 def upstream_cooldown_s() -> float:
     return float(os.environ.get("LLM_UPSTREAM_COOLDOWN_S", "30"))
+
+
+def hedging_enabled() -> bool:
+    return os.environ.get("LLM_HEDGING", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def hedge_delay_ms() -> float | None:
+    raw = os.environ.get("LLM_HEDGE_DELAY_MS", "").strip()
+    return float(raw) if raw else None

@@ -1,6 +1,7 @@
 import asyncio
 
 import httpx
+import pytest
 
 from app.config import upstream_urls
 from app.upstream import UpstreamPool
@@ -119,9 +120,14 @@ def test_url_returns_after_cooldown_and_success_resets(monkeypatch):
     assert pool._failed_at == {}
 
 
-def test_all_attempts_fail_raises_httpx_error():
+@pytest.mark.parametrize("hedging,expected_hits", [
+    (True, ["http://u1:9000", "http://u2:9000", "http://u3:9000"]),
+    (False, ["http://u1:9000", "http://u2:9000"]),  # LLM_HEDGING=0: one failover retry
+])
+def test_all_attempts_fail_raises_httpx_error(hedging, expected_hits):
     hits: list[str] = []
-    pool = UpstreamPool(urls=URLS, transport=_scripted_transport(hits, set(URLS)))
+    pool = UpstreamPool(urls=URLS, transport=_scripted_transport(hits, set(URLS)),
+                        hedging=hedging)
 
     async def run():
         try:
@@ -135,7 +141,7 @@ def test_all_attempts_fail_raises_httpx_error():
         pass
     else:
         raise AssertionError("expected httpx.HTTPError")
-    assert hits == ["http://u1:9000", "http://u2:9000"]  # one retry only
+    assert hits == expected_hits
 
 
 def test_all_in_cooldown_still_tries_upstreams():
@@ -235,3 +241,64 @@ def test_attempt_deadline_caps_slow_upstream_and_fails_over():
     assert elapsed < 1
     assert hits == ["http://u1:9000", "http://u2:9000"]
     assert "http://u1:9000" in pool._failed_at
+
+
+def _latency_transport(hits: list[str], delays: dict[str, float]) -> httpx.MockTransport:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = f"{request.url.scheme}://{request.url.host}:{request.url.port}"
+        hits.append(url)
+        await asyncio.sleep(delays.get(url, 0.0))
+        return httpx.Response(200, json={"completion": "ok", "from": url})
+
+    return httpx.MockTransport(handler)
+
+
+def test_slow_primary_is_hedged_and_fast_replica_wins():
+    hits: list[str] = []
+    pool = UpstreamPool(urls=URLS, transport=_latency_transport(hits, {"http://u1:9000": 2.0}))
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        result = await pool.forward({"prompt": "p"})
+        elapsed = loop.time() - start
+        await pool.aclose()
+        return result, elapsed
+
+    (status, body), elapsed = asyncio.run(run())
+    assert status == 200 and body["from"] == "http://u2:9000"
+    assert hits == ["http://u1:9000", "http://u2:9000"]
+    assert elapsed < 0.5  # hedge fired after ~150ms instead of waiting 2s
+
+
+def test_hedging_disabled_waits_for_primary():
+    hits: list[str] = []
+    pool = UpstreamPool(urls=URLS, transport=_latency_transport(hits, {"http://u1:9000": 0.3}),
+                        hedging=False)
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    status, body = asyncio.run(run())
+    assert body["from"] == "http://u1:9000"
+    assert hits == ["http://u1:9000"]
+
+
+def test_consistently_slow_replica_leaves_the_rotation():
+    hits: list[str] = []
+    delays = {"http://u1:9000": 0.01, "http://u2:9000": 0.01, "http://u3:9000": 0.4}
+    pool = UpstreamPool(urls=URLS, transport=_latency_transport(hits, delays))
+
+    async def run():
+        results = [await pool.forward({"prompt": "p"}) for _ in range(12)]
+        await pool.aclose()
+        return results
+
+    results = asyncio.run(run())
+    winners = [body["from"] for _, body in results]
+    assert "http://u3:9000" not in winners
+    # after its first (hedged) attempt, u3 is no longer chosen first
+    firsts_on_u3 = hits.count("http://u3:9000")
+    assert firsts_on_u3 == 1
