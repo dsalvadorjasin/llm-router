@@ -118,6 +118,7 @@ class UpstreamPool:
         failed: set[str] = set()
         pending: dict[asyncio.Task, tuple[str, float]] = {}
         last_error: httpx.HTTPError | None = None
+        fallback: tuple[int, dict] | None = None
 
         tried = 0
         remaining = iter(plan)
@@ -155,6 +156,10 @@ class UpstreamPool:
                         self._record(url, elapsed)
                         logger.info("upstream url=%s status=%s duration_ms=%.1f attempts=%d",
                                     url, status, elapsed * 1000, tried)
+                        if status >= 500 and pending:
+                            # Another attempt is still in flight and may succeed.
+                            fallback = (status, body)
+                            continue
                         return status, body
                     if not isinstance(exc, httpx.TransportError):
                         raise exc
@@ -172,6 +177,8 @@ class UpstreamPool:
                         upcoming = next_url()
         finally:
             await self._cancel_losers(pending, delay)
+        if fallback is not None:
+            return fallback
         assert last_error is not None
         raise last_error
 

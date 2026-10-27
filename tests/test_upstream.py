@@ -318,3 +318,22 @@ def test_hedging_disabled_keeps_plain_round_robin():
 
     asyncio.run(run())
     assert hits == URLS
+
+
+def test_hedge_error_status_does_not_beat_pending_success():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = f"{request.url.scheme}://{request.url.host}:{request.url.port}"
+        if url == "http://u1:9000":
+            await asyncio.sleep(0.4)
+            return httpx.Response(200, json={"completion": "ok", "from": url})
+        return httpx.Response(503, json={"error": "overloaded", "from": url})
+
+    pool = UpstreamPool(urls=URLS, transport=httpx.MockTransport(handler))
+
+    async def run():
+        result = await pool.forward({"prompt": "p"})
+        await pool.aclose()
+        return result
+
+    status, body = asyncio.run(run())
+    assert status == 200 and body["from"] == "http://u1:9000"
