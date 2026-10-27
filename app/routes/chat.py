@@ -31,17 +31,18 @@ async def chat(body: ChatRequest, request: Request):
         raise HTTPException(status_code=status,
                             detail=upstream.get("detail", "upstream error"))
 
-    if not history and conversation["title"] == "New conversation":
-        await asyncio.to_thread(
-            store.update_conversation, body.conversation_id,
-            title=body.message[:_AUTO_TITLE_LIMIT],
+    def persist_turn() -> dict:
+        # One thread call, so cancelling the request can't leave a user
+        # message without its assistant reply.
+        if not history and conversation["title"] == "New conversation":
+            store.update_conversation(body.conversation_id,
+                                      title=body.message[:_AUTO_TITLE_LIMIT])
+        store.add_message(body.conversation_id, "user", body.message)
+        return store.add_message(
+            body.conversation_id, "assistant", upstream["completion"], latency_ms=latency_ms
         )
 
-    await asyncio.to_thread(store.add_message, body.conversation_id, "user", body.message)
-    assistant = await asyncio.to_thread(
-        store.add_message, body.conversation_id, "assistant", upstream["completion"],
-        latency_ms=latency_ms,
-    )
+    assistant = await asyncio.to_thread(persist_turn)
     return {
         "message": assistant,
         "latency_ms": latency_ms,
