@@ -20,8 +20,9 @@ class UpstreamPool:
         self._next = 0
         self._cooldown_s = upstream_cooldown_s() if cooldown_s is None else cooldown_s
         self._failed_at: dict[str, float] = {}
-        timeout = upstream_timeout_s() if timeout_s is None else timeout_s
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(timeout), transport=transport)
+        self._timeout_s = upstream_timeout_s() if timeout_s is None else timeout_s
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(self._timeout_s),
+                                         transport=transport)
 
     def _in_cooldown(self, url: str, now: float) -> bool:
         failed_at = self._failed_at.get(url)
@@ -45,8 +46,13 @@ class UpstreamPool:
         for url in self._candidates():
             start = time.monotonic()
             try:
-                resp = await self._client.post(f"{url}/v1/completions", json=payload)
-            except httpx.TransportError as exc:
+                # httpx timeouts are per phase (e.g. between body chunks);
+                # this caps the whole attempt.
+                async with asyncio.timeout(self._timeout_s):
+                    resp = await self._client.post(f"{url}/v1/completions", json=payload)
+            except (httpx.TransportError, TimeoutError) as exc:
+                if not isinstance(exc, httpx.HTTPError):
+                    exc = httpx.ReadTimeout(f"upstream exceeded {self._timeout_s}s")
                 self._failed_at[url] = time.monotonic()
                 logger.warning(
                     "upstream url=%s error=%s duration_ms=%.1f cooldown_s=%s",

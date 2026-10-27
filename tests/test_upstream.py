@@ -209,3 +209,29 @@ def test_all_in_cooldown_tries_least_recently_failed_first():
     # being starved until its cooldown expires
     assert results[1] is not None and results[2] is not None
     assert results[1][1]["from"] == "http://u3:9000"
+
+
+def test_attempt_deadline_caps_slow_upstream_and_fails_over():
+    hits: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        url = f"{request.url.scheme}://{request.url.host}:{request.url.port}"
+        hits.append(url)
+        if url == "http://u1:9000":
+            await asyncio.sleep(5)  # MockTransport ignores httpx.Timeout
+        return httpx.Response(200, json={"completion": "ok"})
+
+    pool = UpstreamPool(urls=URLS, transport=httpx.MockTransport(handler), timeout_s=0.1)
+
+    async def run():
+        start = asyncio.get_running_loop().time()
+        result = await pool.forward({"prompt": "p"})
+        elapsed = asyncio.get_running_loop().time() - start
+        await pool.aclose()
+        return result, elapsed
+
+    result, elapsed = asyncio.run(run())
+    assert result == (200, {"completion": "ok"})
+    assert elapsed < 1
+    assert hits == ["http://u1:9000", "http://u2:9000"]
+    assert "http://u1:9000" in pool._failed_at
