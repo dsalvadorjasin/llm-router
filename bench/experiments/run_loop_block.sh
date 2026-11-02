@@ -13,8 +13,11 @@ pid=$(lsof -t -iTCP:8000 -sTCP:LISTEN || true); [ -n "$pid" ] && kill $pid && sl
 mkdir -p "$out"
 cp "$seed.db" "$out/$name.db"; rm -f "$out/$name.db-wal" "$out/$name.db-shm"
 lock=0
-if [ "$mode" = to_thread ]; then git apply bench/experiments/chat_to_thread.patch; lock=1; fi
-trap '[ "$mode" = to_thread ] && git checkout app/routes/chat.py' EXIT
+if [ "$mode" = to_thread ]; then
+  git diff --quiet -- app/routes/chat.py || { echo "app/routes/chat.py has local edits; commit or stash first" >&2; exit 1; }
+  git apply bench/experiments/chat_to_thread.patch; lock=1
+  trap 'git apply -R bench/experiments/chat_to_thread.patch' EXIT
+fi
 EXP_STORE_LOCK=$lock LLM_SERVICE_URLS=http://localhost:9010 APP_DB_PATH="$out/$name.db" \
   nohup uv run uvicorn bench.experiments.instrumented:app --port 8000 > "$out/router_$name.log" 2>&1 &
 until curl -sf localhost:8000/v1/info >/dev/null 2>&1; do sleep 0.5; done
