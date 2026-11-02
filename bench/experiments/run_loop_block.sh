@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Event-loop blocking experiment. Router upstream = one fixed-latency backend
 # (100ms, no tail) on :9010, so /v1/generate latency above ~100ms is router-side.
-#   bench/experiments/run_loop_block.sh NAME DB_SEED GEN_RPS CHAT_RPS [to_thread] OUTDIR
+#   bench/experiments/run_loop_block.sh NAME DB_SEED GEN_RPS CHAT_RPS OUTDIR [to_thread]
 set -euo pipefail
-name=$1; seed=$2; gen=$3; chat=$4; mode=$5; out=$6
+name=$1; seed=$2; gen=$3; chat=$4; out=$5; mode=${6:-sync}
 cd "$(dirname "$0")/../.."
 docker inspect llm-fixed >/dev/null 2>&1 || docker run -d --name llm-fixed -p 9010:9000 \
   -e BASE_MS_MIN=100 -e BASE_MS_MAX=100 -e SLOW_PCT=0 -e DEGRADED_MS=0 -e REPLICA_ID=9 \
