@@ -1,0 +1,20 @@
+# Experiment override: change one backend latency knob at a time, e.g.
+#   EXP_SLOW_PCT=0 docker compose -f docker-compose.yml -f bench/experiments/docker-compose.exp.yml up -d
+# Defaults equal the image defaults, so with no EXP_* vars this is the stock fleet.
+x-latency: &latency
+  SLOW_PCT: "${EXP_SLOW_PCT:-0.10}"
+  DEGRADED_REPLICA: "${EXP_DEGRADED_REPLICA:-3}"
+  DEGRADED_MS: "${EXP_DEGRADED_MS:-1200}"
+services:
+  llm-service-1:
+    environment:
+      <<: *latency
+      REPLICA_ID: "1"
+  llm-service-2:
+    environment:
+      <<: *latency
+      REPLICA_ID: "2"
+  llm-service-3:
+    environment:
+      <<: *latency
+      REPLICA_ID: "3"
