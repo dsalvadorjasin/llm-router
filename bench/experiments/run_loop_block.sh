@@ -10,6 +10,7 @@ docker inspect llm-fixed >/dev/null 2>&1 || docker run -d --name llm-fixed -p 90
   ghcr.io/abboudp/llm-service:latest >/dev/null
 until curl -sf localhost:9010/healthz >/dev/null; do sleep 0.5; done
 pid=$(lsof -t -iTCP:8000 -sTCP:LISTEN || true); [ -n "$pid" ] && kill $pid && sleep 2
+mkdir -p "$out"
 cp "$seed.db" "$out/$name.db"; rm -f "$out/$name.db-wal" "$out/$name.db-shm"
 lock=0
 if [ "$mode" = to_thread ]; then git apply bench/experiments/chat_to_thread.patch; lock=1; fi
